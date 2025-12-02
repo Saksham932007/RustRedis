@@ -881,4 +881,74 @@ impl Command {
         }
         Ok(())
     }
+
+    /// Check if this command modifies data (for AOF logging)
+    pub fn is_write_command(&self) -> bool {
+        matches!(
+            self,
+            Command::Set { .. }
+                | Command::Del { .. }
+                | Command::LPush { .. }
+                | Command::RPush { .. }
+                | Command::LPop { .. }
+                | Command::RPop { .. }
+                | Command::SAdd { .. }
+                | Command::SRem { .. }
+                | Command::HSet { .. }
+                | Command::HDel { .. }
+        )
+    }
+
+    /// Replay a command without sending a response (for AOF restore)
+    pub fn replay(&self, db: &Db) -> Result<(), String> {
+        match self {
+            Command::Set {
+                key,
+                value,
+                expires_at,
+            } => {
+                db.write_string(key.clone(), value.clone(), *expires_at);
+                Ok(())
+            }
+            Command::Del { keys } => {
+                for key in keys {
+                    db.delete(key);
+                }
+                Ok(())
+            }
+            Command::LPush { key, values } => {
+                db.lpush(key.clone(), values.clone());
+                Ok(())
+            }
+            Command::RPush { key, values } => {
+                db.rpush(key.clone(), values.clone());
+                Ok(())
+            }
+            Command::LPop { key } => {
+                db.lpop(key);
+                Ok(())
+            }
+            Command::RPop { key } => {
+                db.rpop(key);
+                Ok(())
+            }
+            Command::SAdd { key, members } => {
+                db.sadd(key.clone(), members.clone());
+                Ok(())
+            }
+            Command::SRem { key, members } => {
+                db.srem(key, members.clone());
+                Ok(())
+            }
+            Command::HSet { key, field, value } => {
+                db.hset(key.clone(), field.clone(), value.clone());
+                Ok(())
+            }
+            Command::HDel { key, fields } => {
+                db.hdel(key, fields.clone());
+                Ok(())
+            }
+            _ => Ok(()), // Read-only commands don't need replay
+        }
+    }
 }
