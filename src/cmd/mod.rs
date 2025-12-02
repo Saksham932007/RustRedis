@@ -15,6 +15,9 @@ pub enum Command {
     /// GET key - Get a value by key
     Get { key: String },
     
+    /// ECHO message - Echo back a message
+    Echo { message: Bytes },
+    
     /// Unknown command
     Unknown(String),
 }
@@ -102,6 +105,20 @@ impl Command {
                 
                 Ok(Command::Get { key })
             }
+            "ECHO" => {
+                // ECHO message
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'echo' command".to_string());
+                }
+                
+                let message = match array.remove(1) {
+                    Frame::Bulk(data) => data,
+                    Frame::Simple(s) => Bytes::from(s),
+                    _ => return Err("ECHO message must be a string".to_string()),
+                };
+                
+                Ok(Command::Echo { message })
+            }
             _ => Ok(Command::Unknown(cmd_name)),
         }
     }
@@ -132,6 +149,11 @@ impl Command {
                 } else {
                     Frame::Null
                 };
+                dst.write_frame(&response).await?;
+            }
+            Command::Echo { message } => {
+                // Echo back the message
+                let response = Frame::Bulk(message.clone());
                 dst.write_frame(&response).await?;
             }
             Command::Unknown(cmd) => {
