@@ -184,7 +184,7 @@ impl Command {
                 expires_at,
             } => {
                 // Write to database with optional expiration
-                db.write_entry_with_expiration(key.clone(), value.clone(), *expires_at);
+                db.write_string(key.clone(), value.clone(), *expires_at);
 
                 // Return OK
                 let response = Frame::Simple("OK".to_string());
@@ -192,7 +192,7 @@ impl Command {
             }
             Command::Get { key } => {
                 // Read from database
-                let response = if let Some(value) = db.read_entry(key) {
+                let response = if let Some(value) = db.read_string(key) {
                     Frame::Bulk(value)
                 } else {
                     Frame::Null
