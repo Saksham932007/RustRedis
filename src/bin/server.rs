@@ -1,4 +1,5 @@
 use tokio::net::{TcpListener, TcpStream};
+use tokio::signal;
 use anyhow::Result;
 
 #[tokio::main]
@@ -7,20 +8,34 @@ async fn main() -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
     
     println!("RustRedis server listening on 127.0.0.1:6379");
+    println!("Press CTRL+C to shutdown gracefully");
 
     loop {
-        // Accept incoming connections
-        let (socket, addr) = listener.accept().await?;
-        
-        println!("Accepted connection from: {}", addr);
-        
-        // Spawn a new task to handle the connection
-        tokio::spawn(async move {
-            if let Err(e) = handle_connection(socket).await {
-                eprintln!("Error handling connection: {}", e);
+        tokio::select! {
+            // Accept incoming connections
+            result = listener.accept() => {
+                let (socket, addr) = result?;
+                
+                println!("Accepted connection from: {}", addr);
+                
+                // Spawn a new task to handle the connection
+                tokio::spawn(async move {
+                    if let Err(e) = handle_connection(socket).await {
+                        eprintln!("Error handling connection: {}", e);
+                    }
+                });
             }
-        });
+            
+            // Listen for shutdown signal (CTRL+C)
+            _ = signal::ctrl_c() => {
+                println!("\nReceived shutdown signal. Gracefully shutting down...");
+                break;
+            }
+        }
     }
+    
+    println!("Server shut down successfully");
+    Ok(())
 }
 
 /// Handle a single client connection
