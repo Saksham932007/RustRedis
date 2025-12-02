@@ -1,6 +1,6 @@
 # RustRedis
 
-A high-performance Redis clone implemented in Rust, featuring full RESP (Redis Serialization Protocol) support and an asynchronous event-driven architecture.
+A high-performance Redis clone implemented in Rust, featuring full RESP (Redis Serialization Protocol) support, multiple data structures, persistence, and Pub/Sub capabilities.
 
 ![Rust](https://img.shields.io/badge/rust-2021-orange.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
@@ -8,11 +8,19 @@ A high-performance Redis clone implemented in Rust, featuring full RESP (Redis S
 
 ## ✨ Features
 
+### Core Features
 - ✅ **Full RESP Protocol Support** - All 6 RESP data types implemented
 - ✅ **Async I/O** - Built on Tokio for high-performance concurrent connections
+- ✅ **Multiple Data Structures** - Strings, Lists, Sets, and Hashes
 - ✅ **TTL/Expiration** - Keys can expire automatically with lazy cleanup
 - ✅ **Thread-Safe** - Shared state using `Arc<Mutex<HashMap>>`
 - ✅ **Zero-Copy** - Efficient byte handling with the `bytes` crate
+
+### Advanced Features
+- ✅ **AOF Persistence** - Append-Only File for data durability
+- ✅ **Pub/Sub Messaging** - Publish/Subscribe pattern support
+- ✅ **Pattern Matching** - KEYS command with glob pattern support
+- ✅ **Database Management** - DBSIZE, FLUSHDB commands
 - ✅ **Structured Logging** - Production-ready observability with `tracing`
 - ✅ **Idiomatic Rust** - Passes clippy, formatted with rustfmt
 
@@ -32,14 +40,40 @@ redis-cli -p 6379
 # Try some commands!
 127.0.0.1:6379> PING
 PONG
+
+# String operations
 127.0.0.1:6379> SET mykey "Hello, RustRedis!"
 OK
 127.0.0.1:6379> GET mykey
 "Hello, RustRedis!"
-127.0.0.1:6379> SET tempkey "expires soon" EX 60
-OK
-127.0.0.1:6379> ECHO "It works!"
-"It works!"
+
+# List operations
+127.0.0.1:6379> LPUSH mylist "world" "hello"
+(integer) 2
+127.0.0.1:6379> LRANGE mylist 0 -1
+1) "hello"
+2) "world"
+
+# Set operations
+127.0.0.1:6379> SADD myset "apple" "banana" "cherry"
+(integer) 3
+127.0.0.1:6379> SMEMBERS myset
+1) "apple"
+2) "banana"
+3) "cherry"
+
+# Hash operations
+127.0.0.1:6379> HSET user:1 name "Alice" age "30"
+(integer) 1
+127.0.0.1:6379> HGETALL user:1
+1) "name"
+2) "Alice"
+3) "age"
+4) "30"
+
+# Pub/Sub
+127.0.0.1:6379> PUBLISH news "Breaking: RustRedis is awesome!"
+(integer) 0
 ```
 
 ## 🏗️ Architecture Overview
@@ -52,6 +86,7 @@ RustRedis is built with a client-server model using Tokio's asynchronous runtime
    - Asynchronous TCP listener bound to port 6379
    - Handles multiple concurrent client connections
    - Implements graceful shutdown on CTRL+C
+   - AOF command logging and replay on startup
    - Command processing loop for each connection
 
 **2. Protocol Layer (`src/frame.rs`, `src/connection.rs`)**
@@ -68,15 +103,39 @@ RustRedis is built with a client-server model using Tokio's asynchronous runtime
 
 **3. Command Layer (`src/cmd/mod.rs`)**
    - Modular command enum architecture
+   - Support for 30+ Redis commands
    - Argument parsing and validation
    - Command execution with database interaction
+   - Write command detection for AOF logging
    - Graceful error handling for unknown commands
 
 **4. Storage Layer (`src/db.rs`)**
    - Thread-safe in-memory key-value store
+   - Support for multiple data types:
+     - **Strings**: Basic key-value pairs
+     - **Lists**: VecDeque for efficient push/pop operations
+     - **Sets**: HashSet for unique membership
+     - **Hashes**: Nested HashMap for field-value pairs
    - Shared state using `Arc<Mutex<HashMap>>`
    - TTL (Time To Live) support with automatic expiration
    - Lazy expiration cleanup on key access
+   - Pattern matching with glob support
+
+**5. Persistence Layer (`src/persistence.rs`)**
+   - AOF (Append-Only File) implementation
+   - Three sync policies:
+     - **Always**: Sync after every write (safest, slowest)
+     - **EverySecond**: Sync every second (balanced, default)
+     - **No**: Let OS decide (fastest, least safe)
+   - Command replay on server startup
+   - RESP serialization for persistence
+
+**6. Pub/Sub Layer (`src/pubsub.rs`)**
+   - Channel-based messaging system
+   - Broadcast channels using Tokio
+   - Dynamic channel creation
+   - Automatic cleanup of empty channels
+   - Support for multiple subscribers per channel
 
 ## 📦 Technology Stack
 
@@ -88,12 +147,57 @@ RustRedis is built with a client-server model using Tokio's asynchronous runtime
 
 ## 💻 Implemented Commands
 
+### String Commands
+| Command | Syntax | Description |
+|---------|--------|-------------|
+| **SET** | `SET key value [EX seconds]` | Set key to hold the string value with optional expiration |
+| **GET** | `GET key` | Get the value of a key. Returns `nil` if key doesn't exist |
+
+### List Commands
+| Command | Syntax | Description |
+|---------|--------|-------------|
+| **LPUSH** | `LPUSH key value [value ...]` | Insert values at the head of the list |
+| **RPUSH** | `RPUSH key value [value ...]` | Insert values at the tail of the list |
+| **LPOP** | `LPOP key` | Remove and return the first element of the list |
+| **RPOP** | `RPOP key` | Remove and return the last element of the list |
+| **LRANGE** | `LRANGE key start stop` | Get a range of elements from a list |
+| **LLEN** | `LLEN key` | Get the length of a list |
+
+### Set Commands
+| Command | Syntax | Description |
+|---------|--------|-------------|
+| **SADD** | `SADD key member [member ...]` | Add members to a set |
+| **SREM** | `SREM key member [member ...]` | Remove members from a set |
+| **SMEMBERS** | `SMEMBERS key` | Get all members of a set |
+| **SISMEMBER** | `SISMEMBER key member` | Check if member exists in a set |
+| **SCARD** | `SCARD key` | Get the cardinality (size) of a set |
+
+### Hash Commands
+| Command | Syntax | Description |
+|---------|--------|-------------|
+| **HSET** | `HSET key field value` | Set a field in a hash |
+| **HGET** | `HGET key field` | Get a field from a hash |
+| **HGETALL** | `HGETALL key` | Get all fields and values from a hash |
+| **HDEL** | `HDEL key field [field ...]` | Delete fields from a hash |
+| **HEXISTS** | `HEXISTS key field` | Check if a field exists in a hash |
+| **HLEN** | `HLEN key` | Get the number of fields in a hash |
+
+### Utility Commands
 | Command | Syntax | Description |
 |---------|--------|-------------|
 | **PING** | `PING [message]` | Test connection. Returns `PONG` or echoes message |
-| **SET** | `SET key value [EX seconds]` | Set key to hold the string value with optional expiration |
-| **GET** | `GET key` | Get the value of a key. Returns `nil` if key doesn't exist |
 | **ECHO** | `ECHO message` | Echo the given string back to the client |
+| **DEL** | `DEL key [key ...]` | Delete one or more keys |
+| **EXISTS** | `EXISTS key` | Check if key exists |
+| **TYPE** | `TYPE key` | Get the type of a value |
+| **KEYS** | `KEYS pattern` | Get all keys matching a pattern |
+| **DBSIZE** | `DBSIZE` | Get the number of keys in the database |
+| **FLUSHDB** | `FLUSHDB` | Clear all keys from the database |
+
+### Pub/Sub Commands
+| Command | Syntax | Description |
+|---------|--------|-------------|
+| **PUBLISH** | `PUBLISH channel message` | Publish a message to a channel |
 
 ### Command Examples
 
@@ -104,17 +208,68 @@ PONG
 > PING "Hello World"
 "Hello World"
 
-# SET - Store values
+# String operations
 > SET name "RustRedis"
 OK
 > SET session "abc123" EX 3600
 OK
-
-# GET - Retrieve values
 > GET name
 "RustRedis"
-> GET nonexistent
-(nil)
+
+# List operations
+> LPUSH tasks "task3" "task2" "task1"
+(integer) 3
+> LRANGE tasks 0 -1
+1) "task1"
+2) "task2"
+3) "task3"
+> LPOP tasks
+"task1"
+> LLEN tasks
+(integer) 2
+
+# Set operations
+> SADD tags "rust" "redis" "async"
+(integer) 3
+> SISMEMBER tags "rust"
+(integer) 1
+> SCARD tags
+(integer) 3
+> SMEMBERS tags
+1) "rust"
+2) "redis"
+3) "async"
+
+# Hash operations
+> HSET user:100 name "Alice" email "alice@example.com" age "30"
+(integer) 1
+> HGET user:100 name
+"Alice"
+> HGETALL user:100
+1) "name"
+2) "Alice"
+3) "email"
+4) "alice@example.com"
+5) "age"
+6) "30"
+> HLEN user:100
+(integer) 3
+
+# Utility commands
+> KEYS user:*
+1) "user:100"
+> TYPE user:100
+hash
+> EXISTS user:100
+(integer) 1
+> DBSIZE
+(integer) 5
+> DEL session
+(integer) 1
+
+# Pub/Sub
+> PUBLISH news "Breaking news!"
+(integer) 0
 
 # ECHO - Echo messages
 > ECHO "Testing RustRedis"
@@ -181,14 +336,17 @@ RustRedis/
 │   ├── bin/
 │   │   └── server.rs          # Server entry point with main loop
 │   ├── cmd/
-│   │   └── mod.rs             # Command enum and execution logic
+│   │   └── mod.rs             # Command enum and execution logic (30+ commands)
 │   ├── connection.rs          # Connection wrapper for frame I/O
-│   ├── db.rs                  # Database with TTL support
+│   ├── db.rs                  # Multi-type database with TTL support
 │   ├── frame.rs               # RESP protocol parser
+│   ├── persistence.rs         # AOF (Append-Only File) implementation
+│   ├── pubsub.rs              # Pub/Sub messaging system
 │   ├── lib.rs                 # Library root
 │   └── main.rs                # Default binary (unused)
 ├── Cargo.toml                 # Dependencies and metadata
 ├── Cargo.lock                 # Dependency lock file
+├── appendonly.aof             # AOF persistence file (created at runtime)
 └── README.md                  # This file
 ```
 
@@ -223,18 +381,31 @@ This project follows industry best practices:
 - [x] Structured logging with tracing
 - [x] Thread-safe shared state
 - [x] Zero-copy byte handling
+- [x] Multiple data structures (Strings, Lists, Sets, Hashes)
+- [x] 30+ Redis commands implemented
+- [x] AOF (Append-Only File) persistence
+- [x] Pub/Sub messaging (PUBLISH command)
+- [x] Pattern matching with KEYS command
+- [x] Database management (DBSIZE, FLUSHDB)
+- [x] Utility commands (DEL, EXISTS, TYPE)
 
-### Planned 📋
-- [ ] Additional commands (DEL, EXISTS, KEYS, etc.)
-- [ ] Persistence (RDB snapshots, AOF)
+### Future Enhancements 📋
+- [ ] SUBSCRIBE/UNSUBSCRIBE commands for Pub/Sub
+- [ ] RDB snapshots for persistence
+- [ ] Transactions (MULTI/EXEC/DISCARD/WATCH)
+- [ ] Sorted Sets data structure
 - [ ] Replication (master-slave)
-- [ ] Pub/Sub messaging
-- [ ] Transactions (MULTI/EXEC)
 - [ ] Lua scripting support
 - [ ] Clustering support
-- [ ] Additional data structures (Lists, Sets, Hashes, Sorted Sets)
-- [ ] Benchmarking suite
+- [ ] Memory eviction policies (LRU, LFU)
+- [ ] Blocking list operations (BLPOP, BRPOP)
+- [ ] Bit operations (SETBIT, GETBIT)
+- [ ] HyperLogLog commands
+- [ ] Geospatial indexes
+- [ ] Streams data structure
 - [ ] Comprehensive test coverage
+- [ ] Benchmarking suite
+- [ ] TLS/SSL support
 
 ## 🧪 Testing
 
