@@ -399,6 +399,75 @@ impl Db {
             }
         }).unwrap_or(0)
     }
+
+    // ===== Database Utility Operations =====
+
+    /// Get the total number of keys in the database
+    pub fn dbsize(&self) -> usize {
+        let state = self.shared.lock().unwrap();
+        state.entries.len()
+    }
+
+    /// Clear all keys from the database
+    pub fn flushdb(&self) {
+        let mut state = self.shared.lock().unwrap();
+        state.entries.clear();
+    }
+
+    /// Get all keys matching a pattern
+    ///
+    /// Supports simple glob-style patterns:
+    /// - h?llo matches hello, hallo, hxllo
+    /// - h*llo matches hllo, heeeello
+    /// - h[ae]llo matches hello and hallo
+    pub fn keys(&self, pattern: &str) -> Vec<String> {
+        let state = self.shared.lock().unwrap();
+
+        // Convert glob pattern to regex
+        let regex_pattern = Self::glob_to_regex(pattern);
+        let re = match regex::Regex::new(&regex_pattern) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+
+        state
+            .entries
+            .keys()
+            .filter(|key| re.is_match(key))
+            .cloned()
+            .collect()
+    }
+
+    /// Convert a glob pattern to a regex pattern
+    fn glob_to_regex(pattern: &str) -> String {
+        let mut regex = String::from("^");
+        let mut chars = pattern.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            match c {
+                '*' => regex.push_str(".*"),
+                '?' => regex.push('.'),
+                '[' => {
+                    regex.push('[');
+                    while let Some(&next_c) = chars.peek() {
+                        chars.next();
+                        regex.push(next_c);
+                        if next_c == ']' {
+                            break;
+                        }
+                    }
+                }
+                '.' | '+' | '^' | '$' | '(' | ')' | '{' | '}' | '|' | '\\' => {
+                    regex.push('\\');
+                    regex.push(c);
+                }
+                _ => regex.push(c),
+            }
+        }
+
+        regex.push('$');
+        regex
+    }
 }
 
 impl Default for Db {

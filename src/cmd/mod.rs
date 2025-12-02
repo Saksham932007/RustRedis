@@ -33,6 +33,15 @@ pub enum Command {
     /// TYPE key - Get the type of a value
     Type { key: String },
 
+    /// DBSIZE - Get the number of keys in the database
+    DbSize,
+
+    /// FLUSHDB - Clear all keys from the database
+    FlushDb,
+
+    /// KEYS pattern - Get all keys matching a pattern
+    Keys { pattern: String },
+
     // List commands
     /// LPUSH key value [value ...] - Push values to the left of a list
     LPush { key: String, values: Vec<Bytes> },
@@ -290,6 +299,38 @@ impl Command {
                 };
 
                 Ok(Command::Type { key })
+            }
+            "DBSIZE" => {
+                // DBSIZE
+                if array.len() != 1 {
+                    return Err("ERR wrong number of arguments for 'dbsize' command".to_string());
+                }
+
+                Ok(Command::DbSize)
+            }
+            "FLUSHDB" => {
+                // FLUSHDB
+                if array.len() != 1 {
+                    return Err("ERR wrong number of arguments for 'flushdb' command".to_string());
+                }
+
+                Ok(Command::FlushDb)
+            }
+            "KEYS" => {
+                // KEYS pattern
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'keys' command".to_string());
+                }
+
+                let pattern = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in pattern")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("KEYS pattern must be a string".to_string()),
+                };
+
+                Ok(Command::Keys { pattern })
             }
             "LPUSH" => {
                 // LPUSH key value [value ...]
@@ -771,6 +812,28 @@ impl Command {
                 let response = Frame::Simple(type_name.to_string());
                 dst.write_frame(&response).await?;
             }
+            Command::DbSize => {
+                // Get the number of keys in the database
+                let size = db.dbsize();
+                let response = Frame::Integer(size as i64);
+                dst.write_frame(&response).await?;
+            }
+            Command::FlushDb => {
+                // Clear all keys from the database
+                db.flushdb();
+                let response = Frame::Simple("OK".to_string());
+                dst.write_frame(&response).await?;
+            }
+            Command::Keys { pattern } => {
+                // Get all keys matching a pattern
+                let keys = db.keys(pattern);
+                let response = Frame::Array(
+                    keys.into_iter()
+                        .map(|k| Frame::Bulk(Bytes::from(k)))
+                        .collect(),
+                );
+                dst.write_frame(&response).await?;
+            }
             Command::LPush { key, values } => {
                 // Push values to the left of a list
                 let len = db.lpush(key.clone(), values.clone());
@@ -921,6 +984,7 @@ impl Command {
             self,
             Command::Set { .. }
                 | Command::Del { .. }
+                | Command::FlushDb
                 | Command::LPush { .. }
                 | Command::RPush { .. }
                 | Command::LPop { .. }
@@ -947,6 +1011,10 @@ impl Command {
                 for key in keys {
                     db.delete(key);
                 }
+                Ok(())
+            }
+            Command::FlushDb => {
+                db.flushdb();
                 Ok(())
             }
             Command::LPush { key, values } => {
