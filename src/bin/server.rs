@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rust_redis::{cmd::Command, connection::Connection, db::Db, persistence::{Aof, AofSyncPolicy}};
+use rust_redis::{cmd::Command, connection::Connection, db::Db, persistence::{Aof, AofSyncPolicy}, pubsub::PubSub};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
@@ -16,6 +16,10 @@ async fn main() -> Result<()> {
 
     // Create the shared database
     let db = Db::new();
+
+    // Create Pub/Sub manager
+    let pubsub = PubSub::new();
+    info!("Pub/Sub system initialized");
 
     // Initialize AOF persistence
     let aof = match Aof::new("appendonly.aof", AofSyncPolicy::EverySecond) {
@@ -71,10 +75,11 @@ async fn main() -> Result<()> {
                 // Clone the db handle for this connection
                 let db = db.clone();
                 let aof = aof.clone();
+                let pubsub = pubsub.clone();
 
                 // Spawn a new task to handle the connection
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(socket, db, aof).await {
+                    if let Err(e) = handle_connection(socket, db, aof, pubsub).await {
                         error!("Error handling connection: {}", e);
                     }
                 });
@@ -93,7 +98,7 @@ async fn main() -> Result<()> {
 }
 
 /// Handle a single client connection
-async fn handle_connection(socket: TcpStream, db: Db, aof: Option<Arc<Aof>>) -> Result<()> {
+async fn handle_connection(socket: TcpStream, db: Db, aof: Option<Arc<Aof>>, pubsub: PubSub) -> Result<()> {
     // Wrap the socket in our Connection struct
     let mut connection = Connection::new(socket);
 
@@ -132,6 +137,6 @@ async fn handle_connection(socket: TcpStream, db: Db, aof: Option<Arc<Aof>>) -> 
         }
 
         // Execute the command
-        command.execute(&db, &mut connection).await?;
+        command.execute(&db, &mut connection, &pubsub).await?;
     }
 }

@@ -1,6 +1,7 @@
 use crate::connection::Connection;
 use crate::db::Db;
 use crate::frame::Frame;
+use crate::pubsub::PubSub;
 use bytes::Bytes;
 use std::io;
 use std::time::{Duration, Instant};
@@ -93,6 +94,10 @@ pub enum Command {
 
     /// HLEN key - Get the number of fields in a hash
     HLen { key: String },
+
+    // Pub/Sub commands
+    /// PUBLISH channel message - Publish a message to a channel
+    Publish { channel: String, message: Bytes },
 
     /// Unknown command
     Unknown(String),
@@ -680,12 +685,34 @@ impl Command {
 
                 Ok(Command::HLen { key })
             }
+            "PUBLISH" => {
+                // PUBLISH channel message
+                if array.len() != 3 {
+                    return Err("ERR wrong number of arguments for 'publish' command".to_string());
+                }
+
+                let channel = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in channel")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("PUBLISH channel must be a string".to_string()),
+                };
+
+                let message = match &array[2] {
+                    Frame::Bulk(data) => data.clone(),
+                    Frame::Simple(s) => Bytes::from(s.clone()),
+                    _ => return Err("PUBLISH message must be a string".to_string()),
+                };
+
+                Ok(Command::Publish { channel, message })
+            }
             _ => Ok(Command::Unknown(cmd_name)),
         }
     }
 
     /// Execute the command and write the response to the connection
-    pub async fn execute(&self, db: &Db, dst: &mut Connection) -> Result<(), io::Error> {
+    pub async fn execute(&self, db: &Db, dst: &mut Connection, pubsub: &PubSub) -> Result<(), io::Error> {
         match self {
             Command::Ping(msg) => {
                 let response = if let Some(msg) = msg {
@@ -872,6 +899,12 @@ impl Command {
                 // Get the number of fields in a hash
                 let len = db.hlen(key);
                 let response = Frame::Integer(len as i64);
+                dst.write_frame(&response).await?;
+            }
+            Command::Publish { channel, message } => {
+                // Publish a message to a channel
+                let num_receivers = pubsub.publish(channel, message.clone());
+                let response = Frame::Integer(num_receivers as i64);
                 dst.write_frame(&response).await?;
             }
             Command::Unknown(cmd) => {
