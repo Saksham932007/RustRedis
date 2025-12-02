@@ -445,8 +445,8 @@ impl Command {
 
                 let stop = match &array[3] {
                     Frame::Bulk(data) => {
-                        let s = std::str::from_utf8(data)
-                            .map_err(|_| "invalid UTF-8 in stop index")?;
+                        let s =
+                            std::str::from_utf8(data).map_err(|_| "invalid UTF-8 in stop index")?;
                         s.parse::<isize>()
                             .map_err(|_| "ERR value is not an integer or out of range")?
                     }
@@ -549,9 +549,7 @@ impl Command {
             "SISMEMBER" => {
                 // SISMEMBER key member
                 if array.len() != 3 {
-                    return Err(
-                        "ERR wrong number of arguments for 'sismember' command".to_string(),
-                    );
+                    return Err("ERR wrong number of arguments for 'sismember' command".to_string());
                 }
 
                 let key = match &array[1] {
@@ -753,7 +751,12 @@ impl Command {
     }
 
     /// Execute the command and write the response to the connection
-    pub async fn execute(&self, db: &Db, dst: &mut Connection, pubsub: &PubSub) -> Result<(), io::Error> {
+    pub async fn execute(
+        &self,
+        db: &Db,
+        dst: &mut Connection,
+        pubsub: &PubSub,
+    ) -> Result<(), io::Error> {
         match self {
             Command::Ping(msg) => {
                 let response = if let Some(msg) = msg {

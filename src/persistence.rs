@@ -30,10 +30,7 @@ impl Aof {
     ///
     /// Opens (or creates) the AOF file at the given path
     pub fn new(path: impl AsRef<Path>, sync_policy: AofSyncPolicy) -> io::Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
 
         Ok(Aof {
             file: Arc::new(Mutex::new(file)),

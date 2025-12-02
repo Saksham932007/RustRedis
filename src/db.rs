@@ -174,24 +174,26 @@ impl Db {
     pub fn lpop(&self, key: &str) -> Option<Bytes> {
         let mut state = self.shared.lock().unwrap();
 
-        state.entries.get_mut(key).and_then(|entry| {
-            match &mut entry.value {
+        state
+            .entries
+            .get_mut(key)
+            .and_then(|entry| match &mut entry.value {
                 Value::List(list) => list.pop_front(),
                 _ => None,
-            }
-        })
+            })
     }
 
     /// Pop a value from the right (tail) of a list
     pub fn rpop(&self, key: &str) -> Option<Bytes> {
         let mut state = self.shared.lock().unwrap();
 
-        state.entries.get_mut(key).and_then(|entry| {
-            match &mut entry.value {
+        state
+            .entries
+            .get_mut(key)
+            .and_then(|entry| match &mut entry.value {
                 Value::List(list) => list.pop_back(),
                 _ => None,
-            }
-        })
+            })
     }
 
     /// Get a range of elements from a list
@@ -202,15 +204,29 @@ impl Db {
             match &entry.value {
                 Value::List(list) => {
                     let len = list.len() as isize;
-                    
+
                     // Handle negative indices
-                    let start = if start < 0 { (len + start).max(0) } else { start.min(len) } as usize;
-                    let stop = if stop < 0 { (len + stop).max(-1) + 1 } else { (stop + 1).min(len) } as usize;
+                    let start = if start < 0 {
+                        (len + start).max(0)
+                    } else {
+                        start.min(len)
+                    } as usize;
+                    let stop = if stop < 0 {
+                        (len + stop).max(-1) + 1
+                    } else {
+                        (stop + 1).min(len)
+                    } as usize;
 
                     if start >= stop {
                         Some(Vec::new())
                     } else {
-                        Some(list.iter().skip(start).take(stop - start).cloned().collect())
+                        Some(
+                            list.iter()
+                                .skip(start)
+                                .take(stop - start)
+                                .cloned()
+                                .collect(),
+                        )
                     }
                 }
                 _ => None,
@@ -222,11 +238,9 @@ impl Db {
     pub fn llen(&self, key: &str) -> Option<usize> {
         let state = self.shared.lock().unwrap();
 
-        state.entries.get(key).and_then(|entry| {
-            match &entry.value {
-                Value::List(list) => Some(list.len()),
-                _ => None,
-            }
+        state.entries.get(key).and_then(|entry| match &entry.value {
+            Value::List(list) => Some(list.len()),
+            _ => None,
         })
     }
 
@@ -259,8 +273,10 @@ impl Db {
     pub fn srem(&self, key: &str, members: Vec<String>) -> usize {
         let mut state = self.shared.lock().unwrap();
 
-        state.entries.get_mut(key).map(|entry| {
-            match &mut entry.value {
+        state
+            .entries
+            .get_mut(key)
+            .map(|entry| match &mut entry.value {
                 Value::Set(set) => {
                     let mut removed = 0;
                     for member in members {
@@ -271,19 +287,17 @@ impl Db {
                     removed
                 }
                 _ => 0,
-            }
-        }).unwrap_or(0)
+            })
+            .unwrap_or(0)
     }
 
     /// Get all members of a set
     pub fn smembers(&self, key: &str) -> Option<Vec<String>> {
         let state = self.shared.lock().unwrap();
 
-        state.entries.get(key).and_then(|entry| {
-            match &entry.value {
-                Value::Set(set) => Some(set.iter().cloned().collect()),
-                _ => None,
-            }
+        state.entries.get(key).and_then(|entry| match &entry.value {
+            Value::Set(set) => Some(set.iter().cloned().collect()),
+            _ => None,
         })
     }
 
@@ -291,24 +305,28 @@ impl Db {
     pub fn sismember(&self, key: &str, member: &str) -> bool {
         let state = self.shared.lock().unwrap();
 
-        state.entries.get(key).map(|entry| {
-            match &entry.value {
+        state
+            .entries
+            .get(key)
+            .map(|entry| match &entry.value {
                 Value::Set(set) => set.contains(member),
                 _ => false,
-            }
-        }).unwrap_or(false)
+            })
+            .unwrap_or(false)
     }
 
     /// Get the cardinality (size) of a set
     pub fn scard(&self, key: &str) -> usize {
         let state = self.shared.lock().unwrap();
 
-        state.entries.get(key).map(|entry| {
-            match &entry.value {
+        state
+            .entries
+            .get(key)
+            .map(|entry| match &entry.value {
                 Value::Set(set) => set.len(),
                 _ => 0,
-            }
-        }).unwrap_or(0)
+            })
+            .unwrap_or(0)
     }
 
     // ===== Hash Operations =====
@@ -323,9 +341,7 @@ impl Db {
         });
 
         match &mut entry.value {
-            Value::Hash(hash) => {
-                hash.insert(field, value).is_none()
-            }
+            Value::Hash(hash) => hash.insert(field, value).is_none(),
             _ => false,
         }
     }
@@ -334,11 +350,9 @@ impl Db {
     pub fn hget(&self, key: &str, field: &str) -> Option<Bytes> {
         let state = self.shared.lock().unwrap();
 
-        state.entries.get(key).and_then(|entry| {
-            match &entry.value {
-                Value::Hash(hash) => hash.get(field).cloned(),
-                _ => None,
-            }
+        state.entries.get(key).and_then(|entry| match &entry.value {
+            Value::Hash(hash) => hash.get(field).cloned(),
+            _ => None,
         })
     }
 
@@ -346,13 +360,9 @@ impl Db {
     pub fn hgetall(&self, key: &str) -> Option<Vec<(String, Bytes)>> {
         let state = self.shared.lock().unwrap();
 
-        state.entries.get(key).and_then(|entry| {
-            match &entry.value {
-                Value::Hash(hash) => {
-                    Some(hash.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-                }
-                _ => None,
-            }
+        state.entries.get(key).and_then(|entry| match &entry.value {
+            Value::Hash(hash) => Some(hash.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+            _ => None,
         })
     }
 
@@ -360,8 +370,10 @@ impl Db {
     pub fn hdel(&self, key: &str, fields: Vec<String>) -> usize {
         let mut state = self.shared.lock().unwrap();
 
-        state.entries.get_mut(key).map(|entry| {
-            match &mut entry.value {
+        state
+            .entries
+            .get_mut(key)
+            .map(|entry| match &mut entry.value {
                 Value::Hash(hash) => {
                     let mut deleted = 0;
                     for field in fields {
@@ -372,32 +384,36 @@ impl Db {
                     deleted
                 }
                 _ => 0,
-            }
-        }).unwrap_or(0)
+            })
+            .unwrap_or(0)
     }
 
     /// Check if a field exists in a hash
     pub fn hexists(&self, key: &str, field: &str) -> bool {
         let state = self.shared.lock().unwrap();
 
-        state.entries.get(key).map(|entry| {
-            match &entry.value {
+        state
+            .entries
+            .get(key)
+            .map(|entry| match &entry.value {
                 Value::Hash(hash) => hash.contains_key(field),
                 _ => false,
-            }
-        }).unwrap_or(false)
+            })
+            .unwrap_or(false)
     }
 
     /// Get the number of fields in a hash
     pub fn hlen(&self, key: &str) -> usize {
         let state = self.shared.lock().unwrap();
 
-        state.entries.get(key).map(|entry| {
-            match &entry.value {
+        state
+            .entries
+            .get(key)
+            .map(|entry| match &entry.value {
                 Value::Hash(hash) => hash.len(),
                 _ => 0,
-            }
-        }).unwrap_or(0)
+            })
+            .unwrap_or(0)
     }
 
     // ===== Database Utility Operations =====

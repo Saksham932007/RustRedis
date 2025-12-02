@@ -38,7 +38,10 @@ impl PubSub {
         if let Some(sender) = state.channels.get(channel) {
             // Send to all subscribers
             // receiver_count() includes the sender itself, so subtract 1
-            sender.send(message).map(|_| sender.receiver_count()).unwrap_or(0)
+            sender
+                .send(message)
+                .map(|_| sender.receiver_count())
+                .unwrap_or(0)
         } else {
             // No subscribers for this channel
             0
@@ -82,7 +85,9 @@ impl PubSub {
         let mut state = self.shared.lock().unwrap();
 
         // Remove channels with no subscribers
-        state.channels.retain(|_, sender| sender.receiver_count() > 0);
+        state
+            .channels
+            .retain(|_, sender| sender.receiver_count() > 0);
     }
 }
 

@@ -1,5 +1,11 @@
 use anyhow::Result;
-use rust_redis::{cmd::Command, connection::Connection, db::Db, persistence::{Aof, AofSyncPolicy}, pubsub::PubSub};
+use rust_redis::{
+    cmd::Command,
+    connection::Connection,
+    db::Db,
+    persistence::{Aof, AofSyncPolicy},
+    pubsub::PubSub,
+};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
@@ -26,10 +32,10 @@ async fn main() -> Result<()> {
         Ok(aof) => {
             info!("AOF persistence enabled with EverySecond sync policy");
             let aof = Arc::new(aof);
-            
+
             // Start background sync task
             Arc::clone(&aof).start_background_sync();
-            
+
             // Try to load existing AOF file
             match Aof::load("appendonly.aof") {
                 Ok(frames) => {
@@ -49,7 +55,7 @@ async fn main() -> Result<()> {
                     warn!("Could not load AOF (this is normal on first run): {}", e);
                 }
             }
-            
+
             Some(aof)
         }
         Err(e) => {
@@ -98,7 +104,12 @@ async fn main() -> Result<()> {
 }
 
 /// Handle a single client connection
-async fn handle_connection(socket: TcpStream, db: Db, aof: Option<Arc<Aof>>, pubsub: PubSub) -> Result<()> {
+async fn handle_connection(
+    socket: TcpStream,
+    db: Db,
+    aof: Option<Arc<Aof>>,
+    pubsub: PubSub,
+) -> Result<()> {
     // Wrap the socket in our Connection struct
     let mut connection = Connection::new(socket);
 
