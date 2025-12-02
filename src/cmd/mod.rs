@@ -255,8 +255,8 @@ impl Command {
                 }
 
                 let mut keys = Vec::new();
-                for i in 1..array.len() {
-                    let key = match &array[i] {
+                for item in array.iter().skip(1) {
+                    let key = match item {
                         Frame::Bulk(data) => std::str::from_utf8(data)
                             .map_err(|_| "invalid UTF-8 in key")?
                             .to_string(),
@@ -347,8 +347,8 @@ impl Command {
                 };
 
                 let mut values = Vec::new();
-                for i in 2..array.len() {
-                    let value = match &array[i] {
+                for item in array.iter().skip(2) {
+                    let value = match item {
                         Frame::Bulk(data) => data.clone(),
                         Frame::Simple(s) => Bytes::from(s.clone()),
                         _ => return Err("LPUSH value must be a string".to_string()),
@@ -373,8 +373,8 @@ impl Command {
                 };
 
                 let mut values = Vec::new();
-                for i in 2..array.len() {
-                    let value = match &array[i] {
+                for item in array.iter().skip(2) {
+                    let value = match item {
                         Frame::Bulk(data) => data.clone(),
                         Frame::Simple(s) => Bytes::from(s.clone()),
                         _ => return Err("RPUSH value must be a string".to_string()),
@@ -489,8 +489,8 @@ impl Command {
                 };
 
                 let mut members = Vec::new();
-                for i in 2..array.len() {
-                    let member = match &array[i] {
+                for item in array.iter().skip(2) {
+                    let member = match item {
                         Frame::Bulk(data) => std::str::from_utf8(data)
                             .map_err(|_| "invalid UTF-8 in member")?
                             .to_string(),
@@ -517,8 +517,8 @@ impl Command {
                 };
 
                 let mut members = Vec::new();
-                for i in 2..array.len() {
-                    let member = match &array[i] {
+                for item in array.iter().skip(2) {
+                    let member = match item {
                         Frame::Bulk(data) => std::str::from_utf8(data)
                             .map_err(|_| "invalid UTF-8 in member")?
                             .to_string(),
@@ -671,8 +671,8 @@ impl Command {
                 };
 
                 let mut fields = Vec::new();
-                for i in 2..array.len() {
-                    let field = match &array[i] {
+                for item in array.iter().skip(2) {
+                    let field = match item {
                         Frame::Bulk(data) => std::str::from_utf8(data)
                             .map_err(|_| "invalid UTF-8 in field")?
                             .to_string(),
