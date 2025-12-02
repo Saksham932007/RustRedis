@@ -3,14 +3,19 @@ use crate::db::Db;
 use crate::frame::Frame;
 use bytes::Bytes;
 use std::io;
+use std::time::{Duration, Instant};
 
 /// Represents a Redis command
 pub enum Command {
     /// PING [message] - Test connection
     Ping(Option<Bytes>),
     
-    /// SET key value - Set a key-value pair
-    Set { key: String, value: Bytes },
+    /// SET key value [EX seconds] - Set a key-value pair with optional expiration
+    Set {
+        key: String,
+        value: Bytes,
+        expires_at: Option<Instant>,
+    },
     
     /// GET key - Get a value by key
     Get { key: String },
@@ -64,7 +69,7 @@ impl Command {
                 }
             }
             "SET" => {
-                // SET key value
+                // SET key value [EX seconds]
                 if array.len() < 3 {
                     return Err("ERR wrong number of arguments for 'set' command".to_string());
                 }
@@ -79,13 +84,52 @@ impl Command {
                     _ => return Err("SET key must be a string".to_string()),
                 };
                 
-                let value = match array.remove(2) {
-                    Frame::Bulk(data) => data,
-                    Frame::Simple(s) => Bytes::from(s),
+                let value = match &array[2] {
+                    Frame::Bulk(data) => data.clone(),
+                    Frame::Simple(s) => Bytes::from(s.clone()),
                     _ => return Err("SET value must be a string".to_string()),
                 };
                 
-                Ok(Command::Set { key, value })
+                // Parse optional EX (expiration in seconds)
+                let mut expires_at = None;
+                let mut i = 3;
+                while i < array.len() {
+                    let option = match &array[i] {
+                        Frame::Bulk(data) => {
+                            std::str::from_utf8(data)
+                                .map_err(|_| "invalid UTF-8 in option")?
+                                .to_uppercase()
+                        }
+                        Frame::Simple(s) => s.to_uppercase(),
+                        _ => return Err("SET option must be a string".to_string()),
+                    };
+                    
+                    match option.as_str() {
+                        "EX" => {
+                            if i + 1 >= array.len() {
+                                return Err("ERR syntax error".to_string());
+                            }
+                            let seconds = match &array[i + 1] {
+                                Frame::Bulk(data) => {
+                                    let s = std::str::from_utf8(data)
+                                        .map_err(|_| "invalid UTF-8 in seconds")?;
+                                    s.parse::<u64>()
+                                        .map_err(|_| "ERR value is not an integer or out of range")?
+                                }
+                                Frame::Simple(s) => {
+                                    s.parse::<u64>()
+                                        .map_err(|_| "ERR value is not an integer or out of range")?
+                                }
+                                _ => return Err("ERR value is not an integer or out of range".to_string()),
+                            };
+                            expires_at = Some(Instant::now() + Duration::from_secs(seconds));
+                            i += 2;
+                        }
+                        _ => return Err(format!("ERR syntax error near '{}'", option)),
+                    }
+                }
+                
+                Ok(Command::Set { key, value, expires_at })
             }
             "GET" => {
                 // GET key
@@ -134,9 +178,9 @@ impl Command {
                 };
                 dst.write_frame(&response).await?;
             }
-            Command::Set { key, value } => {
-                // Write to database
-                db.write_entry(key.clone(), value.clone());
+            Command::Set { key, value, expires_at } => {
+                // Write to database with optional expiration
+                db.write_entry_with_expiration(key.clone(), value.clone(), *expires_at);
                 
                 // Return OK
                 let response = Frame::Simple("OK".to_string());
