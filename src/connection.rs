@@ -1,15 +1,15 @@
+use crate::frame::{Error as FrameError, Frame};
 use bytes::BytesMut;
+use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
-use crate::frame::{Frame, Error as FrameError};
-use std::io;
 
 /// Connection wrapper around a TcpStream that handles buffered reading/writing
 /// and frame parsing/serialization
 pub struct Connection {
     /// The underlying TCP stream wrapped in a buffered writer
     stream: BufWriter<TcpStream>,
-    
+
     /// Read buffer for incoming data
     buffer: BytesMut,
 }
@@ -22,9 +22,9 @@ impl Connection {
             buffer: BytesMut::with_capacity(4096),
         }
     }
-    
+
     /// Read a frame from the connection
-    /// 
+    ///
     /// Returns `Ok(Some(frame))` if a frame was read
     /// Returns `Ok(None)` if the connection was closed
     /// Returns `Err` on IO or parsing errors
@@ -34,10 +34,10 @@ impl Connection {
             if let Some(frame) = self.parse_frame()? {
                 return Ok(Some(frame));
             }
-            
+
             // Not enough data, read more from the socket
             let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
-            
+
             // If 0 bytes read, the connection is closed
             if bytes_read == 0 {
                 if self.buffer.is_empty() {
@@ -51,31 +51,28 @@ impl Connection {
             }
         }
     }
-    
+
     /// Try to parse a frame from the buffer
     fn parse_frame(&mut self) -> Result<Option<Frame>, io::Error> {
         match Frame::parse(&mut self.buffer) {
             Ok(frame) => Ok(frame),
             Err(FrameError::Incomplete) => Ok(None),
-            Err(FrameError::Invalid(msg)) => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                msg,
-            )),
+            Err(FrameError::Invalid(msg)) => Err(io::Error::new(io::ErrorKind::InvalidData, msg)),
             Err(FrameError::Io(e)) => Err(e),
         }
     }
-    
+
     /// Write a frame to the connection
     pub async fn write_frame(&mut self, frame: &Frame) -> Result<(), io::Error> {
         // Serialize the frame to the writer
         self.write_value(frame).await?;
-        
+
         // Flush the buffer to ensure data is sent
         self.stream.flush().await?;
-        
+
         Ok(())
     }
-    
+
     /// Serialize a frame value to the writer
     async fn write_value(&mut self, frame: &Frame) -> Result<(), io::Error> {
         match frame {
@@ -99,23 +96,27 @@ impl Connection {
             }
             Frame::Bulk(data) => {
                 self.stream.write_u8(b'$').await?;
-                self.stream.write_all(data.len().to_string().as_bytes()).await?;
+                self.stream
+                    .write_all(data.len().to_string().as_bytes())
+                    .await?;
                 self.stream.write_all(b"\r\n").await?;
                 self.stream.write_all(data).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
             Frame::Array(frames) => {
                 self.stream.write_u8(b'*').await?;
-                self.stream.write_all(frames.len().to_string().as_bytes()).await?;
+                self.stream
+                    .write_all(frames.len().to_string().as_bytes())
+                    .await?;
                 self.stream.write_all(b"\r\n").await?;
-                
+
                 // Recursively write each frame in the array
                 for frame in frames {
                     Box::pin(self.write_value(frame)).await?;
                 }
             }
         }
-        
+
         Ok(())
     }
 }
