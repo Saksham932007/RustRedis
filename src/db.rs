@@ -28,6 +28,14 @@ impl Db {
             })),
         }
     }
+    
+    /// Read an entry from the database
+    /// 
+    /// Returns `Some(value)` if the key exists, `None` otherwise
+    pub fn read_entry(&self, key: &str) -> Option<Bytes> {
+        let state = self.shared.lock().unwrap();
+        state.entries.get(key).cloned()
+    }
 }
 
 impl Default for Db {
