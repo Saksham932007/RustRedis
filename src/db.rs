@@ -36,6 +36,14 @@ impl Db {
         let state = self.shared.lock().unwrap();
         state.entries.get(key).cloned()
     }
+    
+    /// Write an entry to the database
+    /// 
+    /// If the key already exists, its value will be overwritten
+    pub fn write_entry(&self, key: String, value: Bytes) {
+        let mut state = self.shared.lock().unwrap();
+        state.entries.insert(key, value);
+    }
 }
 
 impl Default for Db {
