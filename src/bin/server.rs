@@ -2,6 +2,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
 use tracing::{info, error, debug};
 use anyhow::Result;
+use rust_redis::{connection::Connection, db::Db, cmd::Command};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -11,6 +12,9 @@ async fn main() -> Result<()> {
         .with_thread_ids(true)
         .with_level(true)
         .init();
+    
+    // Create the shared database
+    let db = Db::new();
     
     // Bind the TCP listener to port 6379 (Redis default port)
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
@@ -26,9 +30,12 @@ async fn main() -> Result<()> {
                 
                 info!("Accepted connection from: {}", addr);
                 
+                // Clone the db handle for this connection
+                let db = db.clone();
+                
                 // Spawn a new task to handle the connection
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(socket).await {
+                    if let Err(e) = handle_connection(socket, db).await {
                         error!("Error handling connection: {}", e);
                     }
                 });
@@ -47,14 +54,36 @@ async fn main() -> Result<()> {
 }
 
 /// Handle a single client connection
-async fn handle_connection(socket: TcpStream) -> Result<()> {
-    // For now, just keep the connection alive
-    // We'll implement the actual protocol handling in later commits
-    let peer_addr = socket.peer_addr()?;
-    debug!("Handling connection from {}", peer_addr);
+async fn handle_connection(socket: TcpStream, db: Db) -> Result<()> {
+    // Wrap the socket in our Connection struct
+    let mut connection = Connection::new(socket);
     
-    // Keep the socket alive but don't do anything yet
-    tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+    debug!("Connection handler started");
     
-    Ok(())
+    // Process commands in a loop
+    loop {
+        // Read a frame from the connection
+        let frame = match connection.read_frame().await? {
+            Some(frame) => frame,
+            None => {
+                // Connection closed
+                debug!("Client disconnected");
+                return Ok(());
+            }
+        };
+        
+        debug!("Received frame: {}", frame);
+        
+        // Parse the frame into a command
+        let command = match Command::from_frame(frame) {
+            Ok(cmd) => cmd,
+            Err(e) => {
+                error!("Failed to parse command: {}", e);
+                continue;
+            }
+        };
+        
+        // Execute the command
+        command.execute(&db, &mut connection).await?;
+    }
 }
