@@ -12,6 +12,9 @@ pub enum Command {
     /// SET key value - Set a key-value pair
     Set { key: String, value: Bytes },
     
+    /// GET key - Get a value by key
+    Get { key: String },
+    
     /// Unknown command
     Unknown(String),
 }
@@ -81,6 +84,24 @@ impl Command {
                 
                 Ok(Command::Set { key, value })
             }
+            "GET" => {
+                // GET key
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'get' command".to_string());
+                }
+                
+                let key = match &array[1] {
+                    Frame::Bulk(data) => {
+                        std::str::from_utf8(data)
+                            .map_err(|_| "invalid UTF-8 in key")?
+                            .to_string()
+                    }
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("GET key must be a string".to_string()),
+                };
+                
+                Ok(Command::Get { key })
+            }
             _ => Ok(Command::Unknown(cmd_name)),
         }
     }
@@ -102,6 +123,15 @@ impl Command {
                 
                 // Return OK
                 let response = Frame::Simple("OK".to_string());
+                dst.write_frame(&response).await?;
+            }
+            Command::Get { key } => {
+                // Read from database
+                let response = if let Some(value) = db.read_entry(key) {
+                    Frame::Bulk(value)
+                } else {
+                    Frame::Null
+                };
                 dst.write_frame(&response).await?;
             }
             Command::Unknown(cmd) => {
