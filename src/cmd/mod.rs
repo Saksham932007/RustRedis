@@ -71,6 +71,29 @@ pub enum Command {
     /// SCARD key - Get the cardinality (size) of a set
     SCard { key: String },
 
+    // Hash commands
+    /// HSET key field value - Set a field in a hash
+    HSet {
+        key: String,
+        field: String,
+        value: Bytes,
+    },
+
+    /// HGET key field - Get a field from a hash
+    HGet { key: String, field: String },
+
+    /// HGETALL key - Get all fields and values from a hash
+    HGetAll { key: String },
+
+    /// HDEL key field [field ...] - Delete fields from a hash
+    HDel { key: String, fields: Vec<String> },
+
+    /// HEXISTS key field - Check if a field exists in a hash
+    HExists { key: String, field: String },
+
+    /// HLEN key - Get the number of fields in a hash
+    HLen { key: String },
+
     /// Unknown command
     Unknown(String),
 }
@@ -519,6 +542,144 @@ impl Command {
 
                 Ok(Command::SCard { key })
             }
+            "HSET" => {
+                // HSET key field value
+                if array.len() != 4 {
+                    return Err("ERR wrong number of arguments for 'hset' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("HSET key must be a string".to_string()),
+                };
+
+                let field = match &array[2] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in field")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("HSET field must be a string".to_string()),
+                };
+
+                let value = match &array[3] {
+                    Frame::Bulk(data) => data.clone(),
+                    Frame::Simple(s) => Bytes::from(s.clone()),
+                    _ => return Err("HSET value must be a string".to_string()),
+                };
+
+                Ok(Command::HSet { key, field, value })
+            }
+            "HGET" => {
+                // HGET key field
+                if array.len() != 3 {
+                    return Err("ERR wrong number of arguments for 'hget' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("HGET key must be a string".to_string()),
+                };
+
+                let field = match &array[2] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in field")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("HGET field must be a string".to_string()),
+                };
+
+                Ok(Command::HGet { key, field })
+            }
+            "HGETALL" => {
+                // HGETALL key
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'hgetall' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("HGETALL key must be a string".to_string()),
+                };
+
+                Ok(Command::HGetAll { key })
+            }
+            "HDEL" => {
+                // HDEL key field [field ...]
+                if array.len() < 3 {
+                    return Err("ERR wrong number of arguments for 'hdel' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("HDEL key must be a string".to_string()),
+                };
+
+                let mut fields = Vec::new();
+                for i in 2..array.len() {
+                    let field = match &array[i] {
+                        Frame::Bulk(data) => std::str::from_utf8(data)
+                            .map_err(|_| "invalid UTF-8 in field")?
+                            .to_string(),
+                        Frame::Simple(s) => s.clone(),
+                        _ => return Err("HDEL field must be a string".to_string()),
+                    };
+                    fields.push(field);
+                }
+
+                Ok(Command::HDel { key, fields })
+            }
+            "HEXISTS" => {
+                // HEXISTS key field
+                if array.len() != 3 {
+                    return Err("ERR wrong number of arguments for 'hexists' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("HEXISTS key must be a string".to_string()),
+                };
+
+                let field = match &array[2] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in field")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("HEXISTS field must be a string".to_string()),
+                };
+
+                Ok(Command::HExists { key, field })
+            }
+            "HLEN" => {
+                // HLEN key
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'hlen' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("HLEN key must be a string".to_string()),
+                };
+
+                Ok(Command::HLen { key })
+            }
             _ => Ok(Command::Unknown(cmd_name)),
         }
     }
@@ -664,6 +825,53 @@ impl Command {
                 // Get the cardinality of a set
                 let card = db.scard(key);
                 let response = Frame::Integer(card as i64);
+                dst.write_frame(&response).await?;
+            }
+            Command::HSet { key, field, value } => {
+                // Set a field in a hash
+                let is_new = db.hset(key.clone(), field.clone(), value.clone());
+                let response = Frame::Integer(if is_new { 1 } else { 0 });
+                dst.write_frame(&response).await?;
+            }
+            Command::HGet { key, field } => {
+                // Get a field from a hash
+                let response = if let Some(value) = db.hget(key, field) {
+                    Frame::Bulk(value)
+                } else {
+                    Frame::Null
+                };
+                dst.write_frame(&response).await?;
+            }
+            Command::HGetAll { key } => {
+                // Get all fields and values from a hash
+                let response = if let Some(pairs) = db.hgetall(key) {
+                    let mut result = Vec::new();
+                    for (field, value) in pairs {
+                        result.push(Frame::Bulk(Bytes::from(field)));
+                        result.push(Frame::Bulk(value));
+                    }
+                    Frame::Array(result)
+                } else {
+                    Frame::Array(Vec::new())
+                };
+                dst.write_frame(&response).await?;
+            }
+            Command::HDel { key, fields } => {
+                // Delete fields from a hash
+                let deleted = db.hdel(key, fields.clone());
+                let response = Frame::Integer(deleted as i64);
+                dst.write_frame(&response).await?;
+            }
+            Command::HExists { key, field } => {
+                // Check if a field exists in a hash
+                let exists = db.hexists(key, field);
+                let response = Frame::Integer(if exists { 1 } else { 0 });
+                dst.write_frame(&response).await?;
+            }
+            Command::HLen { key } => {
+                // Get the number of fields in a hash
+                let len = db.hlen(key);
+                let response = Frame::Integer(len as i64);
                 dst.write_frame(&response).await?;
             }
             Command::Unknown(cmd) => {
