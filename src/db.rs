@@ -491,3 +491,6 @@ impl Default for Db {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests;
