@@ -23,6 +23,38 @@ pub enum Command {
     /// ECHO message - Echo back a message
     Echo { message: Bytes },
 
+    /// DEL key [key ...] - Delete one or more keys
+    Del { keys: Vec<String> },
+
+    /// EXISTS key - Check if key exists
+    Exists { key: String },
+
+    /// TYPE key - Get the type of a value
+    Type { key: String },
+
+    // List commands
+    /// LPUSH key value [value ...] - Push values to the left of a list
+    LPush { key: String, values: Vec<Bytes> },
+
+    /// RPUSH key value [value ...] - Push values to the right of a list
+    RPush { key: String, values: Vec<Bytes> },
+
+    /// LPOP key - Pop a value from the left of a list
+    LPop { key: String },
+
+    /// RPOP key - Pop a value from the right of a list
+    RPop { key: String },
+
+    /// LRANGE key start stop - Get a range of elements from a list
+    LRange {
+        key: String,
+        start: isize,
+        stop: isize,
+    },
+
+    /// LLEN key - Get the length of a list
+    LLen { key: String },
+
     /// Unknown command
     Unknown(String),
 }
@@ -163,6 +195,200 @@ impl Command {
 
                 Ok(Command::Echo { message })
             }
+            "DEL" => {
+                // DEL key [key ...]
+                if array.len() < 2 {
+                    return Err("ERR wrong number of arguments for 'del' command".to_string());
+                }
+
+                let mut keys = Vec::new();
+                for i in 1..array.len() {
+                    let key = match &array[i] {
+                        Frame::Bulk(data) => std::str::from_utf8(data)
+                            .map_err(|_| "invalid UTF-8 in key")?
+                            .to_string(),
+                        Frame::Simple(s) => s.clone(),
+                        _ => return Err("DEL key must be a string".to_string()),
+                    };
+                    keys.push(key);
+                }
+
+                Ok(Command::Del { keys })
+            }
+            "EXISTS" => {
+                // EXISTS key
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'exists' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("EXISTS key must be a string".to_string()),
+                };
+
+                Ok(Command::Exists { key })
+            }
+            "TYPE" => {
+                // TYPE key
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'type' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("TYPE key must be a string".to_string()),
+                };
+
+                Ok(Command::Type { key })
+            }
+            "LPUSH" => {
+                // LPUSH key value [value ...]
+                if array.len() < 3 {
+                    return Err("ERR wrong number of arguments for 'lpush' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("LPUSH key must be a string".to_string()),
+                };
+
+                let mut values = Vec::new();
+                for i in 2..array.len() {
+                    let value = match &array[i] {
+                        Frame::Bulk(data) => data.clone(),
+                        Frame::Simple(s) => Bytes::from(s.clone()),
+                        _ => return Err("LPUSH value must be a string".to_string()),
+                    };
+                    values.push(value);
+                }
+
+                Ok(Command::LPush { key, values })
+            }
+            "RPUSH" => {
+                // RPUSH key value [value ...]
+                if array.len() < 3 {
+                    return Err("ERR wrong number of arguments for 'rpush' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("RPUSH key must be a string".to_string()),
+                };
+
+                let mut values = Vec::new();
+                for i in 2..array.len() {
+                    let value = match &array[i] {
+                        Frame::Bulk(data) => data.clone(),
+                        Frame::Simple(s) => Bytes::from(s.clone()),
+                        _ => return Err("RPUSH value must be a string".to_string()),
+                    };
+                    values.push(value);
+                }
+
+                Ok(Command::RPush { key, values })
+            }
+            "LPOP" => {
+                // LPOP key
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'lpop' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("LPOP key must be a string".to_string()),
+                };
+
+                Ok(Command::LPop { key })
+            }
+            "RPOP" => {
+                // RPOP key
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'rpop' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("RPOP key must be a string".to_string()),
+                };
+
+                Ok(Command::RPop { key })
+            }
+            "LRANGE" => {
+                // LRANGE key start stop
+                if array.len() != 4 {
+                    return Err("ERR wrong number of arguments for 'lrange' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("LRANGE key must be a string".to_string()),
+                };
+
+                let start = match &array[2] {
+                    Frame::Bulk(data) => {
+                        let s = std::str::from_utf8(data)
+                            .map_err(|_| "invalid UTF-8 in start index")?;
+                        s.parse::<isize>()
+                            .map_err(|_| "ERR value is not an integer or out of range")?
+                    }
+                    Frame::Simple(s) => s
+                        .parse::<isize>()
+                        .map_err(|_| "ERR value is not an integer or out of range")?,
+                    _ => return Err("ERR value is not an integer or out of range".to_string()),
+                };
+
+                let stop = match &array[3] {
+                    Frame::Bulk(data) => {
+                        let s = std::str::from_utf8(data)
+                            .map_err(|_| "invalid UTF-8 in stop index")?;
+                        s.parse::<isize>()
+                            .map_err(|_| "ERR value is not an integer or out of range")?
+                    }
+                    Frame::Simple(s) => s
+                        .parse::<isize>()
+                        .map_err(|_| "ERR value is not an integer or out of range")?,
+                    _ => return Err("ERR value is not an integer or out of range".to_string()),
+                };
+
+                Ok(Command::LRange { key, start, stop })
+            }
+            "LLEN" => {
+                // LLEN key
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'llen' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("LLEN key must be a string".to_string()),
+                };
+
+                Ok(Command::LLen { key })
+            }
             _ => Ok(Command::Unknown(cmd_name)),
         }
     }
@@ -202,6 +428,74 @@ impl Command {
             Command::Echo { message } => {
                 // Echo back the message
                 let response = Frame::Bulk(message.clone());
+                dst.write_frame(&response).await?;
+            }
+            Command::Del { keys } => {
+                // Delete keys and return count of deleted keys
+                let mut count = 0;
+                for key in keys {
+                    if db.delete(key) {
+                        count += 1;
+                    }
+                }
+                let response = Frame::Integer(count);
+                dst.write_frame(&response).await?;
+            }
+            Command::Exists { key } => {
+                // Check if key exists
+                let exists = db.exists(key);
+                let response = Frame::Integer(if exists { 1 } else { 0 });
+                dst.write_frame(&response).await?;
+            }
+            Command::Type { key } => {
+                // Get the type of a value
+                let type_name = db.get_type(key).unwrap_or("none");
+                let response = Frame::Simple(type_name.to_string());
+                dst.write_frame(&response).await?;
+            }
+            Command::LPush { key, values } => {
+                // Push values to the left of a list
+                let len = db.lpush(key.clone(), values.clone());
+                let response = Frame::Integer(len as i64);
+                dst.write_frame(&response).await?;
+            }
+            Command::RPush { key, values } => {
+                // Push values to the right of a list
+                let len = db.rpush(key.clone(), values.clone());
+                let response = Frame::Integer(len as i64);
+                dst.write_frame(&response).await?;
+            }
+            Command::LPop { key } => {
+                // Pop a value from the left of a list
+                let response = if let Some(value) = db.lpop(key) {
+                    Frame::Bulk(value)
+                } else {
+                    Frame::Null
+                };
+                dst.write_frame(&response).await?;
+            }
+            Command::RPop { key } => {
+                // Pop a value from the right of a list
+                let response = if let Some(value) = db.rpop(key) {
+                    Frame::Bulk(value)
+                } else {
+                    Frame::Null
+                };
+                dst.write_frame(&response).await?;
+            }
+            Command::LRange { key, start, stop } => {
+                // Get a range of elements from a list
+                let response = if let Some(values) = db.lrange(key, *start, *stop) {
+                    Frame::Array(values.into_iter().map(Frame::Bulk).collect())
+                } else {
+                    Frame::Array(Vec::new())
+                };
+                dst.write_frame(&response).await?;
+            }
+            Command::LLen { key } => {
+                // Get the length of a list
+                let len = db.llen(key).unwrap_or(0);
+                let response = Frame::Integer(len as i64);
                 dst.write_frame(&response).await?;
             }
             Command::Unknown(cmd) => {
