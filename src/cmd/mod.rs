@@ -55,6 +55,22 @@ pub enum Command {
     /// LLEN key - Get the length of a list
     LLen { key: String },
 
+    // Set commands
+    /// SADD key member [member ...] - Add members to a set
+    SAdd { key: String, members: Vec<String> },
+
+    /// SREM key member [member ...] - Remove members from a set
+    SRem { key: String, members: Vec<String> },
+
+    /// SMEMBERS key - Get all members of a set
+    SMembers { key: String },
+
+    /// SISMEMBER key member - Check if a member exists in a set
+    SIsMember { key: String, member: String },
+
+    /// SCARD key - Get the cardinality (size) of a set
+    SCard { key: String },
+
     /// Unknown command
     Unknown(String),
 }
@@ -389,6 +405,120 @@ impl Command {
 
                 Ok(Command::LLen { key })
             }
+            "SADD" => {
+                // SADD key member [member ...]
+                if array.len() < 3 {
+                    return Err("ERR wrong number of arguments for 'sadd' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("SADD key must be a string".to_string()),
+                };
+
+                let mut members = Vec::new();
+                for i in 2..array.len() {
+                    let member = match &array[i] {
+                        Frame::Bulk(data) => std::str::from_utf8(data)
+                            .map_err(|_| "invalid UTF-8 in member")?
+                            .to_string(),
+                        Frame::Simple(s) => s.clone(),
+                        _ => return Err("SADD member must be a string".to_string()),
+                    };
+                    members.push(member);
+                }
+
+                Ok(Command::SAdd { key, members })
+            }
+            "SREM" => {
+                // SREM key member [member ...]
+                if array.len() < 3 {
+                    return Err("ERR wrong number of arguments for 'srem' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("SREM key must be a string".to_string()),
+                };
+
+                let mut members = Vec::new();
+                for i in 2..array.len() {
+                    let member = match &array[i] {
+                        Frame::Bulk(data) => std::str::from_utf8(data)
+                            .map_err(|_| "invalid UTF-8 in member")?
+                            .to_string(),
+                        Frame::Simple(s) => s.clone(),
+                        _ => return Err("SREM member must be a string".to_string()),
+                    };
+                    members.push(member);
+                }
+
+                Ok(Command::SRem { key, members })
+            }
+            "SMEMBERS" => {
+                // SMEMBERS key
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'smembers' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("SMEMBERS key must be a string".to_string()),
+                };
+
+                Ok(Command::SMembers { key })
+            }
+            "SISMEMBER" => {
+                // SISMEMBER key member
+                if array.len() != 3 {
+                    return Err(
+                        "ERR wrong number of arguments for 'sismember' command".to_string(),
+                    );
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("SISMEMBER key must be a string".to_string()),
+                };
+
+                let member = match &array[2] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in member")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("SISMEMBER member must be a string".to_string()),
+                };
+
+                Ok(Command::SIsMember { key, member })
+            }
+            "SCARD" => {
+                // SCARD key
+                if array.len() != 2 {
+                    return Err("ERR wrong number of arguments for 'scard' command".to_string());
+                }
+
+                let key = match &array[1] {
+                    Frame::Bulk(data) => std::str::from_utf8(data)
+                        .map_err(|_| "invalid UTF-8 in key")?
+                        .to_string(),
+                    Frame::Simple(s) => s.clone(),
+                    _ => return Err("SCARD key must be a string".to_string()),
+                };
+
+                Ok(Command::SCard { key })
+            }
             _ => Ok(Command::Unknown(cmd_name)),
         }
     }
@@ -496,6 +626,44 @@ impl Command {
                 // Get the length of a list
                 let len = db.llen(key).unwrap_or(0);
                 let response = Frame::Integer(len as i64);
+                dst.write_frame(&response).await?;
+            }
+            Command::SAdd { key, members } => {
+                // Add members to a set
+                let added = db.sadd(key.clone(), members.clone());
+                let response = Frame::Integer(added as i64);
+                dst.write_frame(&response).await?;
+            }
+            Command::SRem { key, members } => {
+                // Remove members from a set
+                let removed = db.srem(key, members.clone());
+                let response = Frame::Integer(removed as i64);
+                dst.write_frame(&response).await?;
+            }
+            Command::SMembers { key } => {
+                // Get all members of a set
+                let response = if let Some(members) = db.smembers(key) {
+                    Frame::Array(
+                        members
+                            .into_iter()
+                            .map(|m| Frame::Bulk(Bytes::from(m)))
+                            .collect(),
+                    )
+                } else {
+                    Frame::Array(Vec::new())
+                };
+                dst.write_frame(&response).await?;
+            }
+            Command::SIsMember { key, member } => {
+                // Check if a member exists in a set
+                let exists = db.sismember(key, member);
+                let response = Frame::Integer(if exists { 1 } else { 0 });
+                dst.write_frame(&response).await?;
+            }
+            Command::SCard { key } => {
+                // Get the cardinality of a set
+                let card = db.scard(key);
+                let response = Frame::Integer(card as i64);
                 dst.write_frame(&response).await?;
             }
             Command::Unknown(cmd) => {
