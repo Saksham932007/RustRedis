@@ -41,10 +41,26 @@ impl Db {
     
     /// Read an entry from the database
     /// 
-    /// Returns `Some(value)` if the key exists, `None` otherwise
+    /// Returns `Some(value)` if the key exists and has not expired
+    /// Returns `None` if the key doesn't exist or has expired
+    /// Automatically removes expired entries
     pub fn read_entry(&self, key: &str) -> Option<Bytes> {
-        let state = self.shared.lock().unwrap();
-        state.entries.get(key).map(|entry| entry.value.clone())
+        let mut state = self.shared.lock().unwrap();
+        
+        // Check if entry exists
+        let entry = state.entries.get(key)?;
+        
+        // Check if entry has expired
+        if let Some(expires_at) = entry.expires_at {
+            if Instant::now() >= expires_at {
+                // Entry has expired, remove it
+                state.entries.remove(key);
+                return None;
+            }
+        }
+        
+        // Entry exists and hasn't expired
+        Some(entry.value.clone())
     }
     
     /// Write an entry to the database without expiration
