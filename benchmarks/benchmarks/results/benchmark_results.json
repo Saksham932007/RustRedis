@@ -1,0 +1,313 @@
+{
+  "timestamp": "1771270981",
+  "results": [
+    {
+      "name": "Read-Heavy (80% GET / 20% SET)",
+      "concurrency": 1,
+      "total_ops": 10000,
+      "duration_secs": 0.355613112,
+      "ops_per_sec": 28120.447932189858,
+      "p50_us": 27.0,
+      "p95_us": 67.0,
+      "p99_us": 126.0,
+      "max_us": 5483.0,
+      "avg_us": 34.4167,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Read-Heavy (80% GET / 20% SET)",
+      "concurrency": 10,
+      "total_ops": 10000,
+      "duration_secs": 0.137641858,
+      "ops_per_sec": 72652.31772735878,
+      "p50_us": 82.0,
+      "p95_us": 271.0,
+      "p99_us": 1398.0,
+      "max_us": 8476.0,
+      "avg_us": 128.5967,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Read-Heavy (80% GET / 20% SET)",
+      "concurrency": 100,
+      "total_ops": 10000,
+      "duration_secs": 0.130759303,
+      "ops_per_sec": 76476.39418818254,
+      "p50_us": 867.0,
+      "p95_us": 2578.0,
+      "p99_us": 7288.0,
+      "max_us": 13410.0,
+      "avg_us": 1112.5697,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Read-Heavy (80% GET / 20% SET)",
+      "concurrency": 500,
+      "total_ops": 10000,
+      "duration_secs": 0.176480727,
+      "ops_per_sec": 56663.41118370393,
+      "p50_us": 1436.0,
+      "p95_us": 7669.0,
+      "p99_us": 14367.0,
+      "max_us": 42167.0,
+      "avg_us": 2594.5611,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Read-Heavy (80% GET / 20% SET)",
+      "concurrency": 1000,
+      "total_ops": 10000,
+      "duration_secs": 0.209809667,
+      "ops_per_sec": 47662.246182393494,
+      "p50_us": 306.0,
+      "p95_us": 2393.0,
+      "p99_us": 4653.0,
+      "max_us": 18704.0,
+      "avg_us": 601.8056,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Write-Heavy (80% SET / 20% GET)",
+      "concurrency": 1,
+      "total_ops": 10000,
+      "duration_secs": 0.387815216,
+      "ops_per_sec": 25785.476142844276,
+      "p50_us": 33.0,
+      "p95_us": 61.0,
+      "p99_us": 91.0,
+      "max_us": 7015.0,
+      "avg_us": 37.7011,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Write-Heavy (80% SET / 20% GET)",
+      "concurrency": 10,
+      "total_ops": 10000,
+      "duration_secs": 0.153443034,
+      "ops_per_sec": 65170.76558848543,
+      "p50_us": 101.0,
+      "p95_us": 267.0,
+      "p99_us": 775.0,
+      "max_us": 8647.0,
+      "avg_us": 134.3923,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Write-Heavy (80% SET / 20% GET)",
+      "concurrency": 100,
+      "total_ops": 10000,
+      "duration_secs": 0.194857826,
+      "ops_per_sec": 51319.46817470908,
+      "p50_us": 1532.0,
+      "p95_us": 4029.0,
+      "p99_us": 5513.0,
+      "max_us": 17982.0,
+      "avg_us": 1738.5233,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Write-Heavy (80% SET / 20% GET)",
+      "concurrency": 500,
+      "total_ops": 10000,
+      "duration_secs": 0.241281135,
+      "ops_per_sec": 41445.42837963689,
+      "p50_us": 4710.0,
+      "p95_us": 12999.0,
+      "p99_us": 16336.0,
+      "max_us": 20872.0,
+      "avg_us": 5576.6252,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Write-Heavy (80% SET / 20% GET)",
+      "concurrency": 1000,
+      "total_ops": 10000,
+      "duration_secs": 0.419184908,
+      "ops_per_sec": 23855.820687132178,
+      "p50_us": 6605.0,
+      "p95_us": 18582.0,
+      "p99_us": 24796.0,
+      "max_us": 33953.0,
+      "avg_us": 7325.2617,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Mixed (50% GET / 50% SET)",
+      "concurrency": 1,
+      "total_ops": 10000,
+      "duration_secs": 0.616103667,
+      "ops_per_sec": 16231.034703450321,
+      "p50_us": 33.0,
+      "p95_us": 70.0,
+      "p99_us": 404.0,
+      "max_us": 8406.0,
+      "avg_us": 60.4646,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Mixed (50% GET / 50% SET)",
+      "concurrency": 10,
+      "total_ops": 10000,
+      "duration_secs": 0.149723079,
+      "ops_per_sec": 66789.97030244081,
+      "p50_us": 99.0,
+      "p95_us": 221.0,
+      "p99_us": 837.0,
+      "max_us": 13832.0,
+      "avg_us": 138.1788,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Mixed (50% GET / 50% SET)",
+      "concurrency": 100,
+      "total_ops": 10000,
+      "duration_secs": 0.175510317,
+      "ops_per_sec": 56976.70752882294,
+      "p50_us": 1286.0,
+      "p95_us": 3903.0,
+      "p99_us": 5928.0,
+      "max_us": 16258.0,
+      "avg_us": 1610.9684,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Mixed (50% GET / 50% SET)",
+      "concurrency": 500,
+      "total_ops": 10000,
+      "duration_secs": 0.220160778,
+      "ops_per_sec": 45421.35111822688,
+      "p50_us": 2643.0,
+      "p95_us": 8731.0,
+      "p99_us": 12587.0,
+      "max_us": 16024.0,
+      "avg_us": 3151.8979,
+      "errors": 0,
+      "target": "RustRedis"
+    },
+    {
+      "name": "Mixed (50% GET / 50% SET)",
+      "concurrency": 1000,
+      "total_ops": 10000,
+      "duration_secs": 0.296554189,
+      "ops_per_sec": 33720.649955141926,
+      "p50_us": 1814.0,
+      "p95_us": 8741.0,
+      "p99_us": 16337.0,
+      "max_us": 25211.0,
+      "avg_us": 2828.2344,
+      "errors": 0,
+      "target": "RustRedis"
+    }
+  ],
+  "memory_samples": [
+    {
+      "elapsed_secs": 0.000720994,
+      "rss_bytes": 3608576,
+      "vsize_bytes": 282398720,
+      "label": "idle"
+    },
+    {
+      "elapsed_secs": 0.620926544,
+      "rss_bytes": 3837952,
+      "vsize_bytes": 351608832,
+      "label": "read_heavy_c1"
+    },
+    {
+      "elapsed_secs": 0.977822196,
+      "rss_bytes": 4964352,
+      "vsize_bytes": 974499840,
+      "label": "read_heavy_c10"
+    },
+    {
+      "elapsed_secs": 1.427582302,
+      "rss_bytes": 8216576,
+      "vsize_bytes": 2134478848,
+      "label": "read_heavy_c100"
+    },
+    {
+      "elapsed_secs": 1.866143318,
+      "rss_bytes": 9048064,
+      "vsize_bytes": 2135097344,
+      "label": "read_heavy_c500"
+    },
+    {
+      "elapsed_secs": 2.306651633,
+      "rss_bytes": 8929280,
+      "vsize_bytes": 2135097344,
+      "label": "read_heavy_c1000"
+    },
+    {
+      "elapsed_secs": 2.695334452,
+      "rss_bytes": 8929280,
+      "vsize_bytes": 2135097344,
+      "label": "write_heavy_c1"
+    },
+    {
+      "elapsed_secs": 2.849789839,
+      "rss_bytes": 8929280,
+      "vsize_bytes": 2135097344,
+      "label": "write_heavy_c10"
+    },
+    {
+      "elapsed_secs": 3.045866168,
+      "rss_bytes": 8929280,
+      "vsize_bytes": 2135097344,
+      "label": "write_heavy_c100"
+    },
+    {
+      "elapsed_secs": 3.288896782,
+      "rss_bytes": 9342976,
+      "vsize_bytes": 2135142400,
+      "label": "write_heavy_c500"
+    },
+    {
+      "elapsed_secs": 3.712750421,
+      "rss_bytes": 9773056,
+      "vsize_bytes": 2135339008,
+      "label": "write_heavy_c1000"
+    },
+    {
+      "elapsed_secs": 4.336185471,
+      "rss_bytes": 9773056,
+      "vsize_bytes": 2135339008,
+      "label": "mixed_c1"
+    },
+    {
+      "elapsed_secs": 4.486705836,
+      "rss_bytes": 9498624,
+      "vsize_bytes": 2135339008,
+      "label": "mixed_c10"
+    },
+    {
+      "elapsed_secs": 4.663082366,
+      "rss_bytes": 9146368,
+      "vsize_bytes": 2135334912,
+      "label": "mixed_c100"
+    },
+    {
+      "elapsed_secs": 4.886929725,
+      "rss_bytes": 10457088,
+      "vsize_bytes": 2135334912,
+      "label": "mixed_c500"
+    },
+    {
+      "elapsed_secs": 5.184615296,
+      "rss_bytes": 9490432,
+      "vsize_bytes": 2135330816,
+      "label": "mixed_c1000"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 use crate::connection::Connection;
 use crate::db::Db;
 use crate::frame::Frame;
+use crate::metrics::SharedMetrics;
 use crate::pubsub::PubSub;
 use bytes::Bytes;
 use std::io;
@@ -107,6 +108,9 @@ pub enum Command {
     // Pub/Sub commands
     /// PUBLISH channel message - Publish a message to a channel
     Publish { channel: String, message: Bytes },
+
+    /// STATS - Get server statistics and metrics
+    Stats,
 
     /// Unknown command
     Unknown(String),
@@ -746,6 +750,9 @@ impl Command {
 
                 Ok(Command::Publish { channel, message })
             }
+            "STATS" | "INFO" => {
+                Ok(Command::Stats)
+            }
             _ => Ok(Command::Unknown(cmd_name)),
         }
     }
@@ -756,6 +763,7 @@ impl Command {
         db: &Db,
         dst: &mut Connection,
         pubsub: &PubSub,
+        metrics: &SharedMetrics,
     ) -> Result<(), io::Error> {
         match self {
             Command::Ping(msg) => {
@@ -971,6 +979,11 @@ impl Command {
                 // Publish a message to a channel
                 let num_receivers = pubsub.publish(channel, message.clone());
                 let response = Frame::Integer(num_receivers as i64);
+                dst.write_frame(&response).await?;
+            }
+            Command::Stats => {
+                let stats = metrics.format_stats();
+                let response = Frame::Bulk(Bytes::from(stats));
                 dst.write_frame(&response).await?;
             }
             Command::Unknown(cmd) => {
