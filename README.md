@@ -12,8 +12,8 @@ The project includes a custom benchmarking framework, systematic failure analysi
 > At what concurrency level does a sharded lock-based architecture outperform a single-threaded event loop, and what system-level factors drive this crossover?
 
 Secondary questions:
-- How does performance stability (variance) differ between a multi-threaded runtime and a single-threaded event loop under extreme concurrency?
-- What is the throughput cost of AOF persistence at different fsync granularities?
+- How does performance stability (variance) differ between a multi-threaded runtime and a single-threaded event loop?
+- What is the throughput cost of AOF persistence with different fsync policies?
 - At what concurrency level does lock contention become the dominant bottleneck?
 
 ---
@@ -190,7 +190,7 @@ Both systems ran on the same machine (Intel i3-10110U, 4 threads), same benchmar
 | 500 | 48,900 | 67,016 | -27% | 43,818 | 71,763 | -38% | 39,853 | 57,336 | -30% |
 | 1,000 | 29,550 | 45,757* | -35% | 30,646 | 22,628* | **+35%** | 29,604 | 21,530* | **+37%** |
 
-*> Note: Valkey results at 1,000 clients exhibited extreme variance (Standard Deviation ~70-100% of mean), indicating system instability. RustRedis remained stable (SD < 10%).*
+*> Note: Valkey results at 1,000 clients exhibited high variance (Standard Deviation ~70-100% of mean), indicating performance instability under these specific conditions. RustRedis remained stable (SD < 10%).*
 
 #### Tail Latency p99 (microseconds)
 
@@ -206,7 +206,7 @@ Both systems ran on the same machine (Intel i3-10110U, 4 threads), same benchmar
 ### Interpretation
 
 **1. Throughput Variance at High Concurrency:**
-At 1,000 clients, Valkey maintained high mean throughput for read workloads (>45K ops/sec) but exhibited **high variance** (std dev ~32K ops/sec). In some runs, throughput dropped significantly below the mean. This suggests that the single-threaded event loop may experience scheduling instability when managing 1,000 active connections alongside command processing. RustRedis maintained consistent throughput (std dev ~2.6K) at the same load.
+At 1,000 clients on the tested 2-core hardware, Valkey maintained high mean throughput for read workloads (>45K ops/sec) but exhibited **high variance** (std dev ~32K ops/sec). In some runs, throughput dropped significantly below the mean. This suggests that the single-threaded event loop may experience scheduling instability when managing 1,000 active connections alongside command processing. RustRedis maintained consistent throughput (std dev ~2.6K) at the same load.
 
 **2. Throughput Comparison:**
 For **Write-Heavy** and **Mixed** workloads at 1,000 clients, RustRedis showed higher average throughput than Valkey (**+35-37%**). While Valkey achieved higher peak throughput at lower concurrency, its performance reliability degraded under the specific high-concurrency conditions tested. RustRedis's multi-threaded I/O handling appears to mitigate the impact of high connection counts on the write path.
@@ -242,7 +242,7 @@ Full analysis with experimental procedures: [`docs/failure-analysis.md`](docs/fa
 The global `Mutex<HashMap>` becomes the bottleneck when the rate of lock acquisition requests exceeds the rate at which the lock can be transferred between threads. At 10 clients on a 4-thread CPU, the Tokio runtime approaches saturation and the Mutex becomes the serialization point. Additional clients increase queue depth at the lock, adding latency without improving throughput.
 
 ### Throughput degradation factors at 1,000 clients
-Valkey's single-threaded event loop processes both I/O and commands sequentially. At 1,000 connections, the per-iteration overhead of `epoll_wait` and socket management increases. Without enabling I/O threads, this overhead competes directly with command execution cycles, leading to the observed throughput variablity and reduction.
+Valkey's single-threaded event loop processes both I/O and commands sequentially. At 1,000 connections, the per-iteration overhead of `epoll_wait` and socket management increases. Without enabling I/O threads, this overhead competes directly with command execution cycles, leading to the observed throughput variability and reduction.
 
 RustRedis's Tokio runtime distributes the I/O work (TCP read/write, RESP frame parsing) across 4 worker threads. Only the database mutation is serialized through the Mutex. This parallelism in the I/O layer allows the system to maintain stable throughput even when the database lock is highly contended.
 
