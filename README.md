@@ -128,7 +128,7 @@ Results report the **mean ± standard deviation** from 3 independent runs per co
 | 500 | 48,900 ± 3,540 | 43,818 ± 12,458 | 39,853 ± 1,283 |
 | 1,000 | 29,550 ± 2,634 | 30,646 ± 1,910 | 29,604 ± 2,028 |
 
-Peak throughput occurs at 10 concurrent clients for read-heavy workloads (81,032 ops/sec). Write-heavy peaks at 100 clients (66,586 ops/sec) before declining. Mixed workloads show more irregular scaling, peaking at 500 clients (48,909 ops/sec). Beyond peak, throughput degrades as lock contention dominates---read-heavy drops 55% from peak at 1,000 clients.
+Peak throughput occurs at 10 concurrent clients for read-heavy workloads (68,401 ± 3,082 ops/sec). Write-heavy performance peaks at 100 clients (57,539 ± 8,850 ops/sec). Mixed workloads show peak performance at 10 clients (67,084 ± 7,552 ops/sec). Beyond peak, throughput decreases as lock contention becomes the dominant factor.
 
 ### Latency Distribution
 
@@ -136,9 +136,9 @@ At 10 concurrent clients (near-peak throughput):
 
 | Percentile | Read-Heavy | Write-Heavy | Mixed |
 |:----------:|:----------:|:-----------:|:-----:|
-| p50 | 99 us | 121 us | 105 us |
-| p99 | 459 us | 711 us | 2,358 us |
-| max | 12,724 us | 12,173 us | 13,172 us |
+| p50 | 87 us | 118 us | 97 us |
+| p99 | 937 us | 1,964 us | 845 us |
+| max | 10,018 us | 14,694 us | 12,529 us |
 
 At 1,000 clients (contention-dominated):
 
@@ -148,7 +148,7 @@ At 1,000 clients (contention-dominated):
 | p99 | 10,508 us | 24,114 us | 21,627 us |
 | max | 17,842 us | 36,041 us | 34,526 us |
 
-Write-heavy p99 latency increases 34x between 10 and 1,000 clients (711 to 24,411 us), confirming that global mutex contention is the dominant factor as concurrency scales. Read-heavy p99 increases 27x (459 to 12,576 us).
+Write-heavy p99 latency increases ~20x between 10 and 1,000 clients (1,964 to 24,114 us), consistent with global mutex contention under high write load.
 
 ### AOF Persistence Impact
 
@@ -205,17 +205,17 @@ Both systems ran on the same machine (Intel i3-10110U, 4 threads), same benchmar
 
 ### Interpretation
 
-**1. Variability Crisis in Valkey at Scale:**
-Valkey maintained high mean throughput at 1,000 clients (>45K ops/sec for reads) but with **catastrophic variance** (SD ~32K ops/sec). In multiple runs, throughput dropped to <10K ops/sec. This suggests the single-threaded event loop becomes unstable when managing 1,000 active connections + requests. RustRedis maintained consistent throughput (SD ~2.6K) at the same load.
+**1. Throughput Variance at High Concurrency:**
+At 1,000 clients, Valkey maintained high mean throughput for read workloads (>45K ops/sec) but exhibited **high variance** (std dev ~32K ops/sec). In some runs, throughput dropped significantly below the mean. This suggests that the single-threaded event loop may experience scheduling instability when managing 1,000 active connections alongside command processing. RustRedis maintained consistent throughput (std dev ~2.6K) at the same load.
 
-**2. Throughput Crossover (Stability vs Peak):**
-For **Write-Heavy** and **Mixed** workloads at 1,000 clients, RustRedis outperformed Valkey on average by **35-37%**. While Valkey had higher theoretical peaks, its instability under load dragged the average down. RustRedis's multi-threaded I/O successfully weathered the connection storm, delivering lower but stable performance.
+**2. Throughput Comparison:**
+For **Write-Heavy** and **Mixed** workloads at 1,000 clients, RustRedis showed higher average throughput than Valkey (**+35-37%**). While Valkey achieved higher peak throughput at lower concurrency, its performance reliability degraded under the specific high-concurrency conditions tested. RustRedis's multi-threaded I/O handling appears to mitigate the impact of high connection counts on the write path.
 
-**3. Tail Latency Advantage:**
-At 500+ clients, RustRedis consistently delivered **64-78% lower p99 latency**. Even when Valkey's throughput was higher (Read-Heavy c=500), its tail latency was 58ms vs RustRedis's 12ms. This confirms that distributing I/O processing across threads prevents the "head-of-line blocking" effect seen in single-threaded event loops under load.
+**3. Tail Latency Analysis:**
+At 500+ clients, RustRedis consistently delivered **64-78% lower p99 latency** than Valkey in this setup. Even in configurations where Valkey's mean throughput was higher (e.g., Read-Heavy c=500), its tail latency was significantly higher (58ms vs RustRedis's 12ms). This indicates that distributing connection I/O across threads helps prevent individual request latency spikes during congestion.
 
 ### Configuration Disclaimer
-*Note: Redis/Valkey configuration was not exhaustively tuned (e.g., `io-threads`, `tcp-backlog`, kernel parameters). Results reflect default configurations (`redis-server --save "" --appendonly no`) typical of out-of-the-box deployment. Advanced tuning might shift the crossover point.*
+*Note: Redis/Valkey configuration was used with default settings (e.g., standard TCP backlog, I/O threads disabled). Advanced tuning of I/O threads or kernel parameters might mitigate the single-threaded bottlenecks observed here. Results are specific to the tested hardware and default configuration.*
 
 ---
 
@@ -241,11 +241,10 @@ Full analysis with experimental procedures: [`docs/failure-analysis.md`](docs/fa
 
 The global `Mutex<HashMap>` becomes the bottleneck when the rate of lock acquisition requests exceeds the rate at which the lock can be transferred between threads. At 10 clients on a 4-thread CPU, the Tokio runtime approaches saturation and the Mutex becomes the serialization point. Additional clients increase queue depth at the lock, adding latency without improving throughput.
 
-### Why Valkey collapses at 1,000 clients while RustRedis does not
+### Throughput degradation factors at 1,000 clients
+Valkey's single-threaded event loop processes both I/O and commands sequentially. At 1,000 connections, the per-iteration overhead of `epoll_wait` and socket management increases. Without enabling I/O threads, this overhead competes directly with command execution cycles, leading to the observed throughput variablity and reduction.
 
-This is the central finding. Valkey's single-threaded event loop processes both I/O and commands sequentially. At 1,000 connections, the per-iteration cost of `epoll_wait` + `read` + `parse` + `execute` + `write` across all active connections exceeds the event loop's ability to cycle efficiently. The result is a throughput collapse to ~9K ops/sec---worse than single-client performance.
-
-RustRedis's Tokio runtime distributes the I/O work (TCP read/write, RESP frame parsing) across 4 worker threads. Only the database mutation is serialized through the Mutex. This means that at 1,000 clients, 4 threads are concurrently parsing RESP frames and writing responses, while only one thread at a time holds the database lock. The I/O parallelism compensates for the lock serialization.
+RustRedis's Tokio runtime distributes the I/O work (TCP read/write, RESP frame parsing) across 4 worker threads. Only the database mutation is serialized through the Mutex. This parallelism in the I/O layer allows the system to maintain stable throughput even when the database lock is highly contended.
 
 ### Why write-heavy latency spikes at 500+ clients
 
@@ -267,28 +266,22 @@ However, DashMap introduces higher per-operation overhead for operations that mu
 
 Tokio's work-stealing scheduler adds approximately 1-3 us per task wakeup. At 1,000 concurrent tasks on 4 cores, this overhead is negligible relative to lock wait time. Importantly, Tokio's parallel I/O handling is what enables RustRedis to maintain stability at 1,000 clients where Valkey's single-threaded event loop exhibits variance.
 
-## Hardware-Level Analysis
-
-*Planned measurement using `perf stat` (future extension).*
-
-Preliminary hypothesis: Valkey instructions-per-cycle (IPC) likely drops at 1,000 clients due to cache pollution from context switching between 1,000 active file descriptors in a single thread, whereas RustRedis spreads this cache pressure across 4 cores.
-
 ## Threats to Validity
 
-1.  **Single-machine benchmarking**: Client and server shared the same host, introducing resource contention (CPU/context switches) that may affect high-concurrency results more than steady state.
-2.  **Short durations**: 3 runs of 10,000 operations per client (or split) may favor the system with faster warmup; "soak tests" of minutes/hours were not performed.
-3.  **Default Tuning**: Kernel TCP parameters and process limits were left at OS defaults; production Redis deployments typically tune these.
-4.  **Limited Workloads**: Only GET/SET operations with 64-byte values were tested; complex commands (LRANGE, SINTER) might change the lock-holding time profile.
+1.  **Single-machine benchmarking**: Client and server shared the same host, introducing resource contention (CPU/context switches) that may affect high-concurrency results more than steady state usage.
+2.  **Limited sample size**: Results report statistics from 3 runs per configuration. Larger sample sizes would provide tighter confidence intervals.
+3.  **Default Tuning**: Kernel TCP parameters and Redis I/O threads were left at defaults. Enabling Valkey's threaded I/O (`io-threads 4`) would likely improve its high-concurrency performance and potentially shift the crossover point.
+4.  **Limited Workloads**: Only GET/SET operations with 64-byte values were tested; complex commands (LRANGE, SINTER) might change the lock-holding time profile and contention dynamics.
 
 ---
 
 ## Findings
 
-1. **Performance Stability vs Peak Throughput.** RustRedis delivers lower peak throughput than Valkey but significantly better stability at high concurrency. At 1,000 clients, Valkey's throughput variance exceeded 70%, while RustRedis remained stable.
+1. **Performance Stability vs Peak Throughput.** RustRedis delivered lower peak throughput than Valkey but stable performance at high concurrency. At 1,000 clients, Valkey's throughput variance exceeded 70%, while RustRedis remained stable.
 
-2. **Multi-threaded I/O prevents tail latency explosion.** At 500+ clients, RustRedis consistently delivered 64-78% lower p99 latency than Valkey.
+2. **Multi-threaded I/O prevents tail latency degradation.** At 500+ clients, RustRedis consistently delivered 64-78% lower p99 latency than Valkey under the tested conditions.
 
-3. **Sharded locking (DashMap) vs Single Thread.** While Valkey is 32-50% faster at moderate concurrency (10-100 clients), RustRedis's multi-threaded architecture allows it to effectively utilize available cores for I/O, outperforming Valkey by ~35% on Write/Mixed workloads at 1,000 clients when Valkey hits instability.
+3. **Sharded locking (DashMap) vs Single Thread.** While Valkey is 32-50% faster at moderate concurrency (10-100 clients), RustRedis's multi-threaded architecture allows it to effectively utilize available cores for I/O, outperforming Valkey by ~35% on Write/Mixed workloads at 1,000 clients when Valkey exhibited instability.
 
 2. **Tail latency advantage inverts at 500+ clients.** RustRedis's p99 latency is 2-5x worse than Valkey at low concurrency, but 7-9x better at 500-1,000 clients. Valkey's p99 reaches 67-102 ms at 500 clients; RustRedis stays at 6-14 ms.
 
@@ -298,7 +291,7 @@ Preliminary hypothesis: Valkey instructions-per-cycle (IPC) likely drops at 1,00
 
 5. **AOF `Always` sync reduces throughput by approximately 80%.** The per-operation fsync cost (2-10ms on NVMe) dominates all other latency sources. The `EverySecond` policy recovers nearly all performance while limiting the crash window to 1 second.
 
-6. **The stability crossover point is at approximately 500 concurrent clients.** Below this, Valkey is faster. Above this, RustRedis offers predictable performance while Valkey becomes volatile.
+6. **The stability crossover point appears at approximately 500 concurrent clients.** Below this, Valkey is faster. Above this, RustRedis offers predictable performance while Valkey's single-threaded model begins to show variance.
 
 ---
 
@@ -317,7 +310,7 @@ Preliminary hypothesis: Valkey instructions-per-cycle (IPC) likely drops at 1,00
 | **No fsync batching** | AOF `Always` mode calls fsync per-operation rather than batching |
 | **Incomplete Pub/Sub** | PUBLISH only; SUBSCRIBE/UNSUBSCRIBE not implemented in connection lifecycle |
 | **No pipelining optimization** | Each command is parsed and executed before reading the next frame |
-| **Single benchmark run** | Results represent one measurement; proper statistical analysis requires 3+ runs with confidence intervals |
+| **Limited sample size** | Results represent n=3 runs; larger sample sizes would improve statistical authority |
 | **Benchmark client collocated** | Load generator runs on the same machine as the server, introducing resource contention in the measurements |
 
 These limitations are intentional scope constraints for an experimental system. They define the boundary between what this project measures and what it does not.
