@@ -1,0 +1,3 @@
+# This directory stores benchmark output files
+# Run benchmarks: cd benchmarks && cargo run --release
+# Generate graphs: python3 benchmarks/analysis.py

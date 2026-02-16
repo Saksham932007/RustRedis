@@ -3,10 +3,12 @@ use rust_redis::{
     cmd::Command,
     connection::Connection,
     db::Db,
+    metrics::{Metrics, SharedMetrics},
     persistence::{Aof, AofSyncPolicy},
     pubsub::PubSub,
 };
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
 use tracing::{debug, error, info, warn};
@@ -27,6 +29,10 @@ async fn main() -> Result<()> {
     let pubsub = PubSub::new();
     info!("Pub/Sub system initialized");
 
+    // Create metrics
+    let metrics = Metrics::new();
+    info!("Metrics system initialized");
+
     // Initialize AOF persistence
     let aof = match Aof::new("appendonly.aof", AofSyncPolicy::EverySecond) {
         Ok(aof) => {
@@ -43,9 +49,6 @@ async fn main() -> Result<()> {
                     // Replay commands to restore state
                     for frame in frames {
                         if let Ok(cmd) = Command::from_frame(frame) {
-                            // Execute command silently to restore state
-                            // We create a dummy connection for this
-                            // In production, you'd want a better approach
                             let _ = cmd.replay(&db);
                         }
                     }
@@ -78,16 +81,20 @@ async fn main() -> Result<()> {
 
                 info!("Accepted connection from: {}", addr);
 
-                // Clone the db handle for this connection
+                // Clone handles for this connection
                 let db = db.clone();
                 let aof = aof.clone();
                 let pubsub = pubsub.clone();
+                let metrics = Arc::clone(&metrics);
+
+                metrics.increment_connections();
 
                 // Spawn a new task to handle the connection
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(socket, db, aof, pubsub).await {
+                    if let Err(e) = handle_connection(socket, db, aof, pubsub, Arc::clone(&metrics)).await {
                         error!("Error handling connection: {}", e);
                     }
+                    metrics.decrement_connections();
                 });
             }
 
@@ -109,6 +116,7 @@ async fn handle_connection(
     db: Db,
     aof: Option<Arc<Aof>>,
     pubsub: PubSub,
+    metrics: SharedMetrics,
 ) -> Result<()> {
     // Wrap the socket in our Connection struct
     let mut connection = Connection::new(socket);
@@ -138,16 +146,23 @@ async fn handle_connection(
             }
         };
 
-        // Log write commands to AOF
+        // Log write commands to AOF (with timing)
         if let Some(ref aof_writer) = aof {
             if command.is_write_command() {
+                let aof_start = Instant::now();
                 if let Err(e) = aof_writer.append(&frame) {
                     error!("Failed to append to AOF: {}", e);
                 }
+                metrics.add_aof_write_time_us(aof_start.elapsed().as_micros() as u64);
             }
         }
 
-        // Execute the command
-        command.execute(&db, &mut connection, &pubsub).await?;
+        // Execute the command (with timing)
+        let cmd_start = Instant::now();
+        command
+            .execute(&db, &mut connection, &pubsub, &metrics)
+            .await?;
+        metrics.add_command_duration_us(cmd_start.elapsed().as_micros() as u64);
+        metrics.increment_commands();
     }
 }
