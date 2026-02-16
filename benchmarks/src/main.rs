@@ -49,6 +49,10 @@ struct Args {
     /// Key space size (number of unique keys)
     #[arg(long, default_value_t = 10000)]
     key_space: u64,
+
+    /// Number of runs per configuration for statistical averaging
+    #[arg(long, default_value_t = 3)]
+    runs: usize,
 }
 
 // ============================================================================
@@ -82,8 +86,27 @@ struct BenchmarkResult {
 #[derive(Debug, Serialize)]
 struct BenchmarkSuite {
     timestamp: String,
-    results: Vec<BenchmarkResult>,
+    runs_per_config: usize,
+    results: Vec<AggregatedResult>,
     memory_samples: Vec<MemorySample>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct AggregatedResult {
+    name: String,
+    concurrency: usize,
+    target: String,
+    runs: usize,
+    ops_per_sec_mean: f64,
+    ops_per_sec_stddev: f64,
+    p50_us_mean: f64,
+    p50_us_stddev: f64,
+    p99_us_mean: f64,
+    p99_us_stddev: f64,
+    max_us_mean: f64,
+    max_us_stddev: f64,
+    total_errors: u64,
+    per_run: Vec<BenchmarkResult>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -374,6 +397,44 @@ fn run_single_workload(
     }
 }
 
+fn mean(values: &[f64]) -> f64 {
+    if values.is_empty() { return 0.0; }
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
+fn stddev(values: &[f64]) -> f64 {
+    if values.len() < 2 { return 0.0; }
+    let m = mean(values);
+    let variance = values.iter().map(|v| (v - m).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
+    variance.sqrt()
+}
+
+fn aggregate_runs(runs: Vec<BenchmarkResult>) -> AggregatedResult {
+    let n = runs.len();
+    let ops: Vec<f64> = runs.iter().map(|r| r.ops_per_sec).collect();
+    let p50: Vec<f64> = runs.iter().map(|r| r.p50_us).collect();
+    let p99: Vec<f64> = runs.iter().map(|r| r.p99_us).collect();
+    let maxl: Vec<f64> = runs.iter().map(|r| r.max_us).collect();
+    let total_errors: u64 = runs.iter().map(|r| r.errors).sum();
+
+    AggregatedResult {
+        name: runs[0].name.clone(),
+        concurrency: runs[0].concurrency,
+        target: runs[0].target.clone(),
+        runs: n,
+        ops_per_sec_mean: mean(&ops),
+        ops_per_sec_stddev: stddev(&ops),
+        p50_us_mean: mean(&p50),
+        p50_us_stddev: stddev(&p50),
+        p99_us_mean: mean(&p99),
+        p99_us_stddev: stddev(&p99),
+        max_us_mean: mean(&maxl),
+        max_us_stddev: stddev(&maxl),
+        total_errors,
+        per_run: runs,
+    }
+}
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -407,7 +468,7 @@ async fn main() {
         ],
     };
 
-    let mut all_results: Vec<BenchmarkResult> = Vec::new();
+    let mut all_results: Vec<AggregatedResult> = Vec::new();
     let mut memory_samples: Vec<MemorySample> = Vec::new();
     let global_start = Instant::now();
 
@@ -428,6 +489,8 @@ async fn main() {
         }
     }
 
+    println!("Runs per configuration: {} (mean ± stddev)", args.runs);
+
     // Collect idle memory sample
     memory_samples.push(sample_process_memory(global_start, "idle"));
 
@@ -436,49 +499,57 @@ async fn main() {
         println!("\n━━━ {} ━━━", workload.display_name());
 
         for &conc in &concurrency_levels {
-            // Flush DB before each run
-            if let Ok(mut client) = RespClient::connect(&args.host, args.port) {
-                let _ = client.flushdb();
-            }
-
-            // Pre-populate for read-heavy workloads
-            if matches!(workload, WorkloadType::ReadHeavy) {
-                if let Ok(mut client) = RespClient::connect(&args.host, args.port) {
-                    let value = "x".repeat(args.value_size);
-                    let populate_count = args.key_space.min(5000);
-                    for i in 0..populate_count {
-                        let _ = client.set(&format!("bench:key:{}", i), &value);
-                    }
-                }
-            }
-
             print!(
-                "  {:>5} clients × {:>7} ops ... ",
-                conc, args.requests
+                "  {:>5} clients × {:>7} ops × {} runs ... ",
+                conc, args.requests, args.runs
             );
             std::io::stdout().flush().ok();
 
-            let result = run_single_workload(
-                &args.host,
-                args.port,
-                conc,
-                args.requests / conc as u64, // distribute requests across clients
-                args.key_space,
-                args.value_size,
-                *workload,
-                "RustRedis",
-            );
+            let mut run_results = Vec::new();
+            for _ in 0..args.runs {
+                // Flush DB before each run
+                if let Ok(mut client) = RespClient::connect(&args.host, args.port) {
+                    let _ = client.flushdb();
+                }
 
+                // Pre-populate for read-heavy workloads
+                if matches!(workload, WorkloadType::ReadHeavy) {
+                    if let Ok(mut client) = RespClient::connect(&args.host, args.port) {
+                        let value = "x".repeat(args.value_size);
+                        let populate_count = args.key_space.min(5000);
+                        for i in 0..populate_count {
+                            let _ = client.set(&format!("bench:key:{}", i), &value);
+                        }
+                    }
+                }
+
+                let result = run_single_workload(
+                    &args.host,
+                    args.port,
+                    conc,
+                    args.requests / conc as u64,
+                    args.key_space,
+                    args.value_size,
+                    *workload,
+                    "RustRedis",
+                );
+                run_results.push(result);
+            }
+
+            let agg = aggregate_runs(run_results);
+            let cv = if agg.ops_per_sec_mean > 0.0 {
+                agg.ops_per_sec_stddev / agg.ops_per_sec_mean * 100.0
+            } else {
+                0.0
+            };
             println!(
-                "{:>10.0} ops/sec | p50={:.0}µs  p99={:.0}µs  max={:.0}µs | errors={}",
-                result.ops_per_sec,
-                result.p50_us,
-                result.p99_us,
-                result.max_us,
-                result.errors
+                "{:>7.0} ± {:<5.0} ops/sec (CV={:.1}%) | p50={:.0}±{:.0}µs  p99={:.0}±{:.0}µs",
+                agg.ops_per_sec_mean, agg.ops_per_sec_stddev, cv,
+                agg.p50_us_mean, agg.p50_us_stddev,
+                agg.p99_us_mean, agg.p99_us_stddev,
             );
 
-            all_results.push(result);
+            all_results.push(agg);
 
             // Memory sample after this workload
             memory_samples.push(sample_process_memory(
@@ -498,73 +569,85 @@ async fn main() {
                 Ok(true) => println!("  ✓ Connected to Redis"),
                 _ => {
                     println!("  ✗ Failed to PING Redis, skipping");
-                    return write_results(&args.output_dir, all_results, memory_samples);
+                    return write_results(&args.output_dir, args.runs, all_results, memory_samples);
                 }
             },
             Err(e) => {
                 println!("  ✗ Cannot connect to Redis: {}, skipping", e);
-                return write_results(&args.output_dir, all_results, memory_samples);
+                return write_results(&args.output_dir, args.runs, all_results, memory_samples);
             }
         }
 
         for workload in &workloads {
             for &conc in &concurrency_levels {
-                // Flush Redis DB
-                if let Ok(mut client) = RespClient::connect(&args.host, args.redis_port) {
-                    let _ = client.flushdb();
-                }
-
-                // Pre-populate for read-heavy
-                if matches!(workload, WorkloadType::ReadHeavy) {
-                    if let Ok(mut client) = RespClient::connect(&args.host, args.redis_port) {
-                        let value = "x".repeat(args.value_size);
-                        let populate_count = args.key_space.min(5000);
-                        for i in 0..populate_count {
-                            let _ = client.set(&format!("bench:key:{}", i), &value);
-                        }
-                    }
-                }
-
                 print!(
-                    "  [Redis] {:>5} clients × {:>7} ops ({}) ... ",
-                    conc,
-                    args.requests,
-                    workload.display_name()
+                    "  [Redis] {:>5} clients × {:>7} ops × {} runs ({}) ... ",
+                    conc, args.requests, args.runs, workload.display_name()
                 );
                 std::io::stdout().flush().ok();
 
-                let result = run_single_workload(
-                    &args.host,
-                    args.redis_port,
-                    conc,
-                    args.requests / conc as u64,
-                    args.key_space,
-                    args.value_size,
-                    *workload,
-                    "Redis",
-                );
+                let mut run_results = Vec::new();
+                for _ in 0..args.runs {
+                    // Flush Redis DB
+                    if let Ok(mut client) = RespClient::connect(&args.host, args.redis_port) {
+                        let _ = client.flushdb();
+                    }
 
+                    // Pre-populate for read-heavy
+                    if matches!(workload, WorkloadType::ReadHeavy) {
+                        if let Ok(mut client) = RespClient::connect(&args.host, args.redis_port) {
+                            let value = "x".repeat(args.value_size);
+                            let populate_count = args.key_space.min(5000);
+                            for i in 0..populate_count {
+                                let _ = client.set(&format!("bench:key:{}", i), &value);
+                            }
+                        }
+                    }
+
+                    let result = run_single_workload(
+                        &args.host,
+                        args.redis_port,
+                        conc,
+                        args.requests / conc as u64,
+                        args.key_space,
+                        args.value_size,
+                        *workload,
+                        "Redis",
+                    );
+                    run_results.push(result);
+                }
+
+                let agg = aggregate_runs(run_results);
+                let cv = if agg.ops_per_sec_mean > 0.0 {
+                    agg.ops_per_sec_stddev / agg.ops_per_sec_mean * 100.0
+                } else {
+                    0.0
+                };
                 println!(
-                    "{:>10.0} ops/sec | p50={:.0}µs  p99={:.0}µs",
-                    result.ops_per_sec, result.p50_us, result.p99_us,
+                    "{:>7.0} ± {:<5.0} ops/sec (CV={:.1}%) | p50={:.0}±{:.0}µs  p99={:.0}±{:.0}µs",
+                    agg.ops_per_sec_mean, agg.ops_per_sec_stddev, cv,
+                    agg.p50_us_mean, agg.p50_us_stddev,
+                    agg.p99_us_mean, agg.p99_us_stddev,
                 );
 
-                all_results.push(result);
+                all_results.push(agg);
             }
         }
     }
 
     // ── Output results ──────────────────────────────────────────────────────
-    write_results(&args.output_dir, all_results, memory_samples);
+    write_results(&args.output_dir, args.runs, all_results, memory_samples);
 }
 
 fn write_results(
     output_dir: &str,
-    results: Vec<BenchmarkResult>,
+    runs_per_config: usize,
+    results: Vec<AggregatedResult>,
     memory_samples: Vec<MemorySample>,
 ) {
     let suite = BenchmarkSuite {
         timestamp: chrono_now(),
+        runs_per_config,
         results: results.clone(),
         memory_samples: memory_samples.clone(),
     };
@@ -576,41 +659,40 @@ fn write_results(
     println!("\n✓ Results saved to {}", json_path);
 
     // Print summary table
-    println!("\n╔════════════════════════════════════════════════════════════════════════════════════════╗");
-    println!("║                              BENCHMARK SUMMARY TABLE                                  ║");
-    println!("╠════════════════════════════════════════════════════════════════════════════════════════╣");
+    println!("\n╔═══════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+    println!("║                              BENCHMARK SUMMARY (mean ± stddev, n={})                               ║", runs_per_config);
+    println!("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣");
     println!(
-        "║ {:8} │ {:30} │ {:>10} │ {:>8} │ {:>8} │ {:>8} ║",
-        "Target", "Workload", "ops/sec", "p50(µs)", "p99(µs)", "max(µs)"
+        "║ {:8} │ {:30} │ {:>18} │ {:>14} │ {:>14} ║",
+        "Target", "Workload", "ops/sec", "p50(µs)", "p99(µs)"
     );
-    println!("╟──────────┼────────────────────────────────┼────────────┼──────────┼──────────┼──────────╢");
+    println!("╟──────────┼────────────────────────────────┼────────────────────┼────────────────┼────────────────╢");
 
     for r in &results {
         println!(
-            "║ {:8} │ {:30} │ {:>10.0} │ {:>8.0} │ {:>8.0} │ {:>8.0} ║",
+            "║ {:8} │ {:30} │ {:>8.0} ± {:<6.0} │ {:>6.0} ± {:<5.0} │ {:>6.0} ± {:<5.0} ║",
             format!("{}@c{}", r.target, r.concurrency),
             r.name,
-            r.ops_per_sec,
-            r.p50_us,
-            r.p99_us,
-            r.max_us
+            r.ops_per_sec_mean, r.ops_per_sec_stddev,
+            r.p50_us_mean, r.p50_us_stddev,
+            r.p99_us_mean, r.p99_us_stddev,
         );
     }
-    println!("╚════════════════════════════════════════════════════════════════════════════════════════╝");
+    println!("╚═══════════════════════════════════════════════════════════════════════════════════════════════════════╝");
 
     // Print comparison if both Redis and RustRedis results exist
     let rust_results: Vec<_> = results.iter().filter(|r| r.target == "RustRedis").collect();
     let redis_results: Vec<_> = results.iter().filter(|r| r.target == "Redis").collect();
 
     if !redis_results.is_empty() {
-        println!("\n┌─── Performance Comparison ─────────────────────────────┐");
+        println!("\n┌─── Performance Comparison (mean values) ──────────────┐");
         for rr in &rust_results {
             if let Some(redis) = redis_results
                 .iter()
                 .find(|r| r.concurrency == rr.concurrency && r.name == rr.name)
             {
-                let throughput_diff = (rr.ops_per_sec / redis.ops_per_sec - 1.0) * 100.0;
-                let latency_diff = (rr.p99_us / redis.p99_us - 1.0) * 100.0;
+                let throughput_diff = (rr.ops_per_sec_mean / redis.ops_per_sec_mean - 1.0) * 100.0;
+                let latency_diff = (rr.p99_us_mean / redis.p99_us_mean - 1.0) * 100.0;
                 println!(
                     "│ {} c={}: throughput {:+.1}%, p99 latency {:+.1}%",
                     rr.name, rr.concurrency, throughput_diff, latency_diff
