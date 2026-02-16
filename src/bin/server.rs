@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
 use tracing::{debug, error, info, warn};
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     // Initialize tracing subscriber for structured logging
     tracing_subscriber::fmt()
