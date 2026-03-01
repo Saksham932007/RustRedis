@@ -31,6 +31,7 @@ graph TB
     subgraph Server
         L["TCP Listener :6379"]
         M["Metrics -- AtomicU64"]
+        CM["CommandMetrics -- per-cmd stats"]
     end
 
     subgraph Per-Connection Task
@@ -60,11 +61,104 @@ graph TB
     CE --> AOF --> BG
     CE --> PS --> BC
     CE --> M
+    CE --> CM
 ```
 
 The system follows a task-per-connection model: each accepted TCP connection spawns an independent Tokio task that reads RESP frames, parses commands, executes them against the shared database, and writes responses. All database state is shared across tasks via either a global `Arc<Mutex<HashMap>>` or a sharded `DashMap`.
 
 Full architecture analysis: [`docs/system-design.md`](docs/system-design.md)
+
+---
+
+## Scalable Concurrent Metrics Collection
+
+RustRedis includes a **per-command telemetry system** inspired by PostgreSQL's `pg_stat_statements`. For each command type (GET, SET, HGET, etc.), the system tracks:
+
+| Metric | Description |
+|--------|-------------|
+| `calls` | Total invocation count |
+| `total_time_us` | Cumulative execution time (µs) |
+| `min_time_us` | Minimum observed execution time |
+| `max_time_us` | Maximum observed execution time |
+| `avg_time_us` | Computed average (total/calls) |
+
+Because adding fine-grained telemetry to the hot path can severely degrade throughput, the system implements **three interchangeable concurrency strategies** to study their contention characteristics:
+
+### Strategy A: Global Mutex (`global_mutex`)
+
+A single `std::sync::Mutex<HashMap<&str, CommandStat>>` protects all per-command counters. Every `record()` call on the hot path acquires this global lock. Lock wait time is instrumented and exposed via `CMDSTAT`.
+
+**Characteristics:**
+- Simplest implementation
+- Maximum contention — all command updates serialize through one lock
+- Lock convoy effect under high concurrency: threads that hold the lock briefly are queued behind threads that hold it longer
+- Useful as a baseline for measuring contention overhead
+
+### Strategy B: Sharded (`sharded`)
+
+Uses `DashMap<&str, CommandStat>` which internally partitions entries across N shards (N = available parallelism). Different command types hash to different shards, allowing parallel updates.
+
+**Characteristics:**
+- Significantly reduced contention vs global mutex
+- Parallel updates for different commands (GET and SET can update simultaneously)
+- Still serializes concurrent updates to the *same* command type within a shard
+- Default strategy — best balance of accuracy and performance
+
+### Strategy C: Thread-Local Batched (`thread_local`)
+
+Each Tokio worker thread maintains its own `thread_local!` counters. Records accumulate locally with **zero synchronization** on the hot path. Every 1,000 operations (or every 100ms via background flush task), local batches are aggregated into a global snapshot.
+
+**Characteristics:**
+- Near-zero overhead on the hot path (no atomic operations, no locks)
+- Eventual consistency — `CMDSTAT` output may lag by up to 100ms
+- Solves the lock convoy effect entirely by removing synchronization from the hot path
+- Slightly higher memory usage (one HashMap per worker thread)
+
+### Contention Analysis & Performance Comparison
+
+| Strategy | Hot-Path Sync | Expected Overhead | Lock Convoy Risk | CMDSTAT Freshness |
+|:--------:|:-------------:|:-----------------:|:----------------:|:-----------------:|
+| Disabled | None | 0% (baseline) | None | N/A |
+| GlobalMutex | Global lock | ~5-15% at high concurrency | **High** | Real-time |
+| Sharded | Per-shard lock | ~1-3% | Low | Real-time |
+| ThreadLocalBatched | None | <1% | **None** | ~100ms lag |
+
+At **1,000 concurrent clients**, the GlobalMutex strategy can exhibit measurable throughput degradation because every command execution contends on a single lock — this mirrors the same lock convoy problem observed in the database layer's `Mutex<HashMap>`. The Sharded strategy reduces this by distributing contention across DashMap's shards. The ThreadLocalBatched strategy eliminates telemetry-induced contention entirely by deferring aggregation to a background task.
+
+### How Thread-Local Batching Solves the Lock Convoy Effect
+
+The **lock convoy effect** occurs when multiple threads compete for a single lock in a tight loop. Even when each critical section is short, the overhead of lock handoff (cache line invalidation, context switches, scheduler wake-ups) causes throughput to degrade non-linearly with thread count.
+
+Thread-local batching eliminates this by partitioning the write path:
+1. Each worker thread writes to its own `HashMap` via `thread_local!` — no synchronization needed
+2. Batches are flushed periodically (every 100ms) by a single background Tokio task
+3. The flush acquires a lock only once per interval, amortizing synchronization cost across thousands of records
+4. The hot path (command execution → metric recording) never blocks on any lock
+
+This is the same principle used by high-performance logging frameworks (e.g., `spdlog`'s async logger) and hardware performance counters.
+
+### Usage
+
+```bash
+# Start with a specific strategy (default: sharded)
+RUSTREDIS_METRICS_STRATEGY=thread_local cargo run --release --bin server
+
+# Query per-command stats
+redis-cli -p 6379 CMDSTAT
+
+# Example output:
+# # CommandStats (strategy: sharded)
+# cmdstat_get:calls=15234,total_time_us=45702,avg_time_us=3.00,min_time_us=1,max_time_us=142
+# cmdstat_set:calls=8921,total_time_us=35684,avg_time_us=4.00,min_time_us=2,max_time_us=387
+```
+
+### Benchmarking Strategies
+
+```bash
+# Run strategy comparison (repeat for each strategy)
+RUSTREDIS_METRICS_STRATEGY=sharded cargo run --release --bin server
+cd benchmarks && cargo run --release -- --metrics-strategy sharded
+```
 
 ---
 
@@ -377,6 +471,7 @@ RustRedis/
     persistence.rs         AOF append, 3 sync policies, replay
     pubsub.rs              Pub/Sub broadcast channels
     metrics.rs             Atomic instrumentation counters
+    command_metrics.rs     Per-command telemetry (3 concurrency strategies)
     lib.rs                 Module exports
   benchmarks/
     src/main.rs            Custom load generator (configurable concurrency/workloads)
@@ -392,7 +487,7 @@ RustRedis/
 ## Appendix: Supported Commands
 
 <details>
-<summary>31 commands across 5 categories (click to expand)</summary>
+<summary>32 commands across 6 categories (click to expand)</summary>
 
 ### String Commands
 | Command | Syntax |
@@ -442,6 +537,7 @@ RustRedis/
 | FLUSHDB | `FLUSHDB` |
 | PUBLISH | `PUBLISH channel message` |
 | STATS | `STATS` |
+| CMDSTAT | `CMDSTAT` |
 
 </details>
 

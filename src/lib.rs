@@ -1,4 +1,5 @@
 pub mod cmd;
+pub mod command_metrics;
 pub mod connection;
 pub mod db;
 pub mod db_dashmap;
