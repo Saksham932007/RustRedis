@@ -1,6 +1,7 @@
 use anyhow::Result;
 use rust_redis::{
     cmd::Command,
+    command_metrics::{self, CommandMetricsCollector, MetricsStrategy, SharedCommandMetrics},
     connection::Connection,
     db::Db,
     metrics::{Metrics, SharedMetrics},
@@ -32,6 +33,19 @@ async fn main() -> Result<()> {
     // Create metrics
     let metrics = Metrics::new();
     info!("Metrics system initialized");
+
+    // Create per-command metrics collector
+    let strategy = std::env::var("RUSTREDIS_METRICS_STRATEGY")
+        .map(|s| MetricsStrategy::from_str_loose(&s))
+        .unwrap_or(MetricsStrategy::Sharded);
+    let command_metrics = CommandMetricsCollector::new(strategy);
+    info!("Command metrics initialized (strategy: {})", strategy.name());
+
+    // Start background flush task for ThreadLocalBatched strategy
+    if let Some(tl_collector) = command_metrics.thread_local_collector() {
+        command_metrics::start_flush_task(tl_collector);
+        info!("Thread-local metrics flush task started (100ms interval)");
+    }
 
     // Initialize AOF persistence
     let aof = match Aof::new("appendonly.aof", AofSyncPolicy::EverySecond) {
@@ -86,12 +100,17 @@ async fn main() -> Result<()> {
                 let aof = aof.clone();
                 let pubsub = pubsub.clone();
                 let metrics = Arc::clone(&metrics);
+                let command_metrics = Arc::clone(&command_metrics);
 
                 metrics.increment_connections();
 
                 // Spawn a new task to handle the connection
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(socket, db, aof, pubsub, Arc::clone(&metrics)).await {
+                    if let Err(e) = handle_connection(
+                        socket, db, aof, pubsub,
+                        Arc::clone(&metrics),
+                        Arc::clone(&command_metrics),
+                    ).await {
                         error!("Error handling connection: {}", e);
                     }
                     metrics.decrement_connections();
@@ -117,6 +136,7 @@ async fn handle_connection(
     aof: Option<Arc<Aof>>,
     pubsub: PubSub,
     metrics: SharedMetrics,
+    command_metrics: SharedCommandMetrics,
 ) -> Result<()> {
     // Wrap the socket in our Connection struct
     let mut connection = Connection::new(socket);
@@ -158,11 +178,16 @@ async fn handle_connection(
         }
 
         // Execute the command (with timing)
+        let cmd_name = command.name();
         let cmd_start = Instant::now();
         command
-            .execute(&db, &mut connection, &pubsub, &metrics)
+            .execute(&db, &mut connection, &pubsub, &metrics, &command_metrics)
             .await?;
-        metrics.add_command_duration_us(cmd_start.elapsed().as_micros() as u64);
+        let duration_us = cmd_start.elapsed().as_micros() as u64;
+        metrics.add_command_duration_us(duration_us);
         metrics.increment_commands();
+
+        // Record per-command metrics
+        command_metrics.record(cmd_name, duration_us);
     }
 }

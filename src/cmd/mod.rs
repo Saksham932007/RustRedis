@@ -1,3 +1,4 @@
+use crate::command_metrics::SharedCommandMetrics;
 use crate::connection::Connection;
 use crate::db::Db;
 use crate::frame::Frame;
@@ -111,6 +112,9 @@ pub enum Command {
 
     /// STATS - Get server statistics and metrics
     Stats,
+
+    /// CMDSTAT - Get per-command telemetry statistics
+    CmdStat,
 
     /// Unknown command
     Unknown(String),
@@ -753,7 +757,53 @@ impl Command {
             "STATS" | "INFO" => {
                 Ok(Command::Stats)
             }
+            "CMDSTAT" | "CMDSTATS" => {
+                Ok(Command::CmdStat)
+            }
             _ => Ok(Command::Unknown(cmd_name)),
+        }
+    }
+
+    /// Get the canonical name of this command as a static string.
+    /// Used for per-command metrics tracking.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Command::Ping(_) => "PING",
+            Command::Set { .. } => "SET",
+            Command::Get { .. } => "GET",
+            Command::Echo { .. } => "ECHO",
+            Command::Del { .. } => "DEL",
+            Command::Exists { .. } => "EXISTS",
+            Command::Type { .. } => "TYPE",
+            Command::DbSize => "DBSIZE",
+            Command::FlushDb => "FLUSHDB",
+            Command::Keys { .. } => "KEYS",
+            Command::LPush { .. } => "LPUSH",
+            Command::RPush { .. } => "RPUSH",
+            Command::LPop { .. } => "LPOP",
+            Command::RPop { .. } => "RPOP",
+            Command::LRange { .. } => "LRANGE",
+            Command::LLen { .. } => "LLEN",
+            Command::SAdd { .. } => "SADD",
+            Command::SRem { .. } => "SREM",
+            Command::SMembers { .. } => "SMEMBERS",
+            Command::SIsMember { .. } => "SISMEMBER",
+            Command::SCard { .. } => "SCARD",
+            Command::HSet { .. } => "HSET",
+            Command::HGet { .. } => "HGET",
+            Command::HGetAll { .. } => "HGETALL",
+            Command::HDel { .. } => "HDEL",
+            Command::HExists { .. } => "HEXISTS",
+            Command::HLen { .. } => "HLEN",
+            Command::Publish { .. } => "PUBLISH",
+            Command::Stats => "STATS",
+            Command::CmdStat => "CMDSTAT",
+            Command::Unknown(name) => {
+                // Return a static str for common unknowns; otherwise "UNKNOWN"
+                match name.as_str() {
+                    _ => "UNKNOWN",
+                }
+            }
         }
     }
 
@@ -764,6 +814,7 @@ impl Command {
         dst: &mut Connection,
         pubsub: &PubSub,
         metrics: &SharedMetrics,
+        command_metrics: &SharedCommandMetrics,
     ) -> Result<(), io::Error> {
         match self {
             Command::Ping(msg) => {
@@ -983,6 +1034,11 @@ impl Command {
             }
             Command::Stats => {
                 let stats = metrics.format_stats();
+                let response = Frame::Bulk(Bytes::from(stats));
+                dst.write_frame(&response).await?;
+            }
+            Command::CmdStat => {
+                let stats = command_metrics.format_cmdstat();
                 let response = Frame::Bulk(Bytes::from(stats));
                 dst.write_frame(&response).await?;
             }

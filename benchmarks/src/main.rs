@@ -53,6 +53,11 @@ struct Args {
     /// Number of runs per configuration for statistical averaging
     #[arg(long, default_value_t = 3)]
     runs: usize,
+
+    /// Run metrics strategy comparison benchmark
+    /// (server must be restarted with each RUSTREDIS_METRICS_STRATEGY for accurate results)
+    #[arg(long, default_value = "none")]
+    metrics_strategy: String,
 }
 
 // ============================================================================
@@ -182,6 +187,12 @@ impl RespClient {
         self.send_command(&["SET", key, value, "EX", &ttl_secs.to_string()])?;
         self.read_response()?;
         Ok(())
+    }
+
+    fn cmdstat(&mut self) -> io::Result<String> {
+        self.send_command(&["CMDSTAT"])?;
+        let n = self.read_response()?;
+        Ok(String::from_utf8_lossy(&self.buf[..n]).to_string())
     }
 }
 
@@ -637,6 +648,83 @@ async fn main() {
 
     // ── Output results ──────────────────────────────────────────────────────
     write_results(&args.output_dir, args.runs, all_results, memory_samples);
+
+    // ── Metrics strategy comparison (if requested) ──────────────────────────
+    if args.metrics_strategy != "none" {
+        println!("\n━━━ Metrics Strategy Comparison ━━━");
+        println!("Current server strategy: {}", args.metrics_strategy);
+        println!("  (restart server with RUSTREDIS_METRICS_STRATEGY=<strategy> for each comparison)");
+        println!();
+
+        // Run a mixed workload at a single concurrency for the current strategy
+        let test_concurrency = 100;
+        let test_requests = args.requests;
+
+        print!(
+            "  Strategy: {:20} | {} clients × {} ops × {} runs ... ",
+            args.metrics_strategy, test_concurrency, test_requests, args.runs
+        );
+        std::io::stdout().flush().ok();
+
+        let mut run_results = Vec::new();
+        for _ in 0..args.runs {
+            if let Ok(mut client) = RespClient::connect(&args.host, args.port) {
+                let _ = client.flushdb();
+            }
+
+            let result = run_single_workload(
+                &args.host,
+                args.port,
+                test_concurrency,
+                test_requests / test_concurrency as u64,
+                args.key_space,
+                args.value_size,
+                WorkloadType::Mixed,
+                &format!("RustRedis-{}", args.metrics_strategy),
+            );
+            run_results.push(result);
+        }
+
+        let agg = aggregate_runs(run_results);
+        println!(
+            "{:>7.0} ± {:<5.0} ops/sec | p99={:.0}±{:.0}µs",
+            agg.ops_per_sec_mean, agg.ops_per_sec_stddev,
+            agg.p99_us_mean, agg.p99_us_stddev,
+        );
+
+        // Fetch CMDSTAT from the server
+        if let Ok(mut client) = RespClient::connect(&args.host, args.port) {
+            if let Ok(stats) = client.cmdstat() {
+                println!("\n  Per-command stats (from CMDSTAT):");
+                for line in stats.lines() {
+                    let line = line.trim();
+                    if !line.is_empty() && !line.starts_with('$') && !line.starts_with('*') {
+                        println!("    {}", line);
+                    }
+                }
+            }
+        }
+
+        println!();
+        println!("  ┌─── Metrics Strategy Comparison Guide ────────────────────┐");
+        println!("  │ To compare strategies, run this benchmark 4 times:      │");
+        println!("  │                                                         │");
+        println!("  │ 1. RUSTREDIS_METRICS_STRATEGY=disabled                  │");
+        println!("  │    cargo run --release --bin server                      │");
+        println!("  │    cargo run --release -- --metrics-strategy disabled    │");
+        println!("  │                                                         │");
+        println!("  │ 2. RUSTREDIS_METRICS_STRATEGY=global_mutex              │");
+        println!("  │    (repeat server + benchmark)                          │");
+        println!("  │                                                         │");
+        println!("  │ 3. RUSTREDIS_METRICS_STRATEGY=sharded                   │");
+        println!("  │    (repeat server + benchmark)                          │");
+        println!("  │                                                         │");
+        println!("  │ 4. RUSTREDIS_METRICS_STRATEGY=thread_local              │");
+        println!("  │    (repeat server + benchmark)                          │");
+        println!("  │                                                         │");
+        println!("  │ Compare ops/sec and p99 across runs to measure overhead │");
+        println!("  └─────────────────────────────────────────────────────────┘");
+    }
 }
 
 fn write_results(
