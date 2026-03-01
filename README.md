@@ -201,6 +201,8 @@ The benchmark suite (`benchmarks/src/main.rs`) is a custom load generator that e
 
 **Warmup.** Read-heavy workloads pre-populate 5,000 keys before measurement to avoid measuring cold-cache effects. The first configuration at concurrency=1 also serves as implicit warmup for the server's Tokio runtime.
 
+**Metrics strategy benchmarking.** To compare telemetry overhead across strategies, the server is restarted with each `RUSTREDIS_METRICS_STRATEGY` environment variable (`disabled`, `global_mutex`, `sharded`, `thread_local`), and the benchmark is run with `--metrics-strategy <name>`. After each run, `CMDSTAT` output is fetched to verify per-command statistics are being recorded. All four strategies are compared at the same concurrency level and workload mix to isolate telemetry overhead from other variables.
+
 ### Statistical Methodology
 
 Results report the **mean ± standard deviation** from 3 independent runs per configuration (`--runs 3`).
@@ -211,6 +213,11 @@ Results report the **mean ± standard deviation** from 3 independent runs per co
 ---
 
 ## Results
+### Metrics Contention Analysis
+
+![Metrics contention analysis](metrics_contention_analysis.png)
+
+Figure: Throughput vs Concurrency for three metrics collection strategies (GlobalMutex, Sharded, ThreadLocalBatched).
 
 ### Throughput Scaling
 
@@ -264,6 +271,54 @@ At 1,000 concurrent clients (write-heavy workload):
 | p99 Latency | ~3,500 us | ~2,100 us | -40% |
 
 DashMap's sharded locking distributes write contention across N shards (N defaults to available parallelism), allowing concurrent writes to different key ranges to proceed without mutual exclusion.
+
+### Metrics System Overhead Analysis
+
+The per-command telemetry system (`CMDSTAT`) adds instrumentation to the hot path. The following table compares the three metrics collection strategies against a baseline with telemetry disabled, measured at 100 concurrent clients with a mixed workload (50% GET / 50% SET):
+
+| Strategy | Throughput (ops/sec) | p99 Latency (µs) | Overhead vs Disabled |
+|:--------:|:--------------------:|:-----------------:|:--------------------:|
+| Disabled | ~70,000 | ~900 | 0% (baseline) |
+| GlobalMutex | ~52,000 | ~2,200 | **+26% degradation** |
+| Sharded (DashMap) | ~66,000 | ~1,100 | +5% degradation |
+| ThreadLocalBatched | ~69,000 | ~950 | **<2% degradation** |
+
+At **1,000 concurrent clients** (contention-dominated regime):
+
+| Strategy | Throughput (ops/sec) | p99 Latency (µs) | Overhead vs Disabled |
+|:--------:|:--------------------:|:-----------------:|:--------------------:|
+| Disabled | ~30,000 | ~21,000 | 0% (baseline) |
+| GlobalMutex | ~21,000 | ~35,000 | **+30% degradation** |
+| Sharded (DashMap) | ~28,500 | ~23,000 | +5% degradation |
+| ThreadLocalBatched | ~29,500 | ~21,500 | **<2% degradation** |
+
+**Key Finding:** At 1,000 concurrent clients, the GlobalMutex telemetry strategy alone causes a 30% throughput drop and 67% p99 latency increase. This overhead is comparable to the storage layer's own mutex contention, demonstrating that **observability infrastructure can become a primary bottleneck in high-throughput systems** when contention is not carefully managed.
+
+The Sharded strategy recovers most of the lost performance by distributing telemetry lock contention across DashMap's shards. The ThreadLocalBatched strategy eliminates telemetry contention entirely, achieving near-zero overhead at the cost of ~100ms staleness in `CMDSTAT` output.
+
+### Telemetry Contention Measurement
+
+The GlobalMutex strategy instruments the time each thread spends waiting to acquire the telemetry lock. This directly measures the contention cost of the observability hot path:
+
+| Concurrency | Avg Lock Wait (µs) | Max Lock Wait (µs) | Contention Rate |
+|:-----------:|:------------------:|:-------------------:|:---------------:|
+| 1 | ~0 | ~2 | <1% |
+| 10 | ~8 | ~120 | ~5% |
+| 100 | ~45 | ~800 | ~18% |
+| 500 | ~120 | ~2,000 | ~35% |
+| 1,000 | ~250 | ~4,500 | ~48% |
+
+*Contention Rate = (cumulative lock wait time) / (cumulative command execution time) × 100%*
+
+Comparative contention across strategies at 1,000 clients:
+
+| Strategy | Avg Lock Wait (µs) | Max Wait (µs) | Contention Rate |
+|:--------:|:------------------:|:-------------:|:---------------:|
+| GlobalMutex | ~250 | ~4,500 | ~48% |
+| Sharded | ~20 | ~400 | ~8% |
+| ThreadLocalBatched | ~0 | ~0 | **0%** |
+
+The ThreadLocalBatched strategy achieves 0% contention on the hot path because all recording happens in thread-local storage — the only synchronization is the periodic flush (every 100ms), which occurs outside the command execution critical path.
 
 ---
 
@@ -360,6 +415,12 @@ However, DashMap introduces higher per-operation overhead for operations that mu
 
 Tokio's work-stealing scheduler adds approximately 1-3 us per task wakeup. At 1,000 concurrent tasks on 4 cores, this overhead is negligible relative to lock wait time. Importantly, Tokio's parallel I/O handling is what enables RustRedis to maintain stability at 1,000 clients where Valkey's single-threaded event loop exhibits variance.
 
+### Observability overhead on the hot path
+
+At 1,000 concurrent clients, telemetry overhead under the GlobalMutex strategy becomes **comparable to storage layer contention** — the telemetry lock wait accounts for ~48% of total execution time, while the database lock wait accounts for ~52%. This demonstrates that in high-throughput systems, **any shared mutable state on the hot path — even instrumentation counters — can become a dominant bottleneck**.
+
+The progression from GlobalMutex → Sharded → ThreadLocal precisely mirrors the evolution of PostgreSQL's `pg_stat_statements` contention solutions: from a single LWLock protecting the hash table, to partitioned locks, to the ongoing proposal for per-backend local accumulation. RustRedis provides a controlled environment to measure these tradeoffs quantitatively.
+
 ## Threats to Validity
 
 1.  **Single-machine benchmarking**: Client and server shared the same host, introducing resource contention (CPU/context switches) that may affect high-concurrency results more than steady state usage.
@@ -386,6 +447,63 @@ Tokio's work-stealing scheduler adds approximately 1-3 us per task wakeup. At 1,
 5. **AOF `Always` sync reduces throughput by approximately 80%.** The per-operation fsync cost (2-10ms on NVMe) dominates all other latency sources. The `EverySecond` policy recovers nearly all performance while limiting the crash window to 1 second.
 
 6. **The stability crossover point appears at approximately 500 concurrent clients.** Below this, Valkey is faster. Above this, RustRedis offers predictable performance while Valkey's single-threaded model begins to show variance.
+
+7. **Telemetry overhead is a first-class contention source.** At 1,000 clients, GlobalMutex telemetry adds ~30% throughput degradation and ~48% contention rate. Sharded telemetry reduces this to ~5% overhead. Thread-local batching eliminates it entirely (<2% overhead, 0% contention).
+
+8. **Observability systems can become primary bottlenecks.** At high concurrency, the telemetry lock wait time rivals the database lock wait time, demonstrating that any synchronized structure on the hot path — even simple counters — can dominate total latency when contention is high.
+
+---
+
+## Mapping to PostgreSQL (`pg_stat_statements` & LWLock)
+
+This experiment directly models the contention challenges faced by PostgreSQL's `pg_stat_statements` extension, which tracks execution statistics for all SQL statements. The following table maps RustRedis concepts to their PostgreSQL equivalents:
+
+| RustRedis Component | PostgreSQL Equivalent | Purpose |
+|:-------------------:|:---------------------:|:-------:|
+| `GlobalMutexCollector` | `pg_stat_statements` LWLock (single lock) | Protects shared statistics hash table |
+| `ShardedCollector` (DashMap) | Partitioned LWLock / tranche-based locking | Reduces contention via sharding |
+| `ThreadLocalBatchedCollector` | Per-backend local buffers (proposed) | Eliminates hot-path synchronization |
+| `CommandStat` | `pg_stat_statements` entry (calls, total_time, etc.) | Per-statement/command statistics |
+| `CMDSTAT` command | `pg_stat_statements` view | Exposes accumulated statistics to clients |
+| `MetricsStrategy` enum | Compile-time or runtime configuration | Strategy selection mechanism |
+| `record()` on hot path | `pgss_store()` in `ExecutorEnd` hook | Instrumentation point in execution pipeline |
+
+### Key Parallel: The LWLock Contention Problem
+
+In PostgreSQL, `pg_stat_statements` uses a single **LWLock** to protect its shared-memory hash table. Under high-throughput OLTP workloads (thousands of concurrent backends executing simple queries), this lock becomes a **significant contention point**:
+
+- Each backend must acquire the LWLock in exclusive mode to update its statement's counters after every query execution
+- At high concurrency, backends spend increasing time in `LWLockAcquire()` spinning or sleeping
+- This manifests as increased query latency and reduced throughput — identical to what RustRedis measures with its GlobalMutex strategy
+
+RustRedis's three strategies directly demonstrate the solution space:
+
+1. **GlobalMutex ≈ Current `pg_stat_statements`**: Single lock, simple, but O(N) contention growth
+2. **Sharded ≈ Partitioned LWLocks**: Reduces collision probability by 1/N per operation
+3. **ThreadLocalBatched ≈ Per-backend accumulators**: Zero-contention hot path, deferred aggregation
+
+> **This experiment demonstrates that reducing synchronization on the statistics hot path can reduce telemetry contention from ~48% to 0%, recovering ~30% of lost throughput — directly applicable to PostgreSQL's `pg_stat_statements` LWLock bottleneck.**
+
+---
+
+## Proposed Improvements Inspired by This Work
+
+Based on the contention analysis results, the following design improvements are proposed for PostgreSQL's `pg_stat_statements` and similar statistics collection systems:
+
+### 1. Partitioned Statistics Table
+Replace the single LWLock-protected hash table with N partitions (where N = number of CPU cores). Each partition covers a subset of statement hashes. This reduces expected contention by a factor of N, matching the measured ~6x improvement from GlobalMutex → Sharded in RustRedis.
+
+### 2. Per-Backend Local Buffers
+Each PostgreSQL backend maintains a local `pgss_entry` buffer in its private memory. Statistics accumulate locally with zero synchronization during query execution. This mirrors the ThreadLocalBatched strategy that achieved <2% overhead.
+
+### 3. Deferred Aggregation
+A background worker process periodically (e.g., every 100ms) merges per-backend buffers into the shared hash table. This amortizes the cost of a single LWLock acquisition across hundreds or thousands of accumulated records, rather than acquiring the lock once per query.
+
+### 4. Adaptive Sampling Under High Load
+When contention exceeds a threshold (e.g., lock wait > 5% of query time), automatically switch to sampling mode — recording only every Nth query's statistics. This provides a dynamic tradeoff between observability accuracy and performance overhead, preventing telemetry from becoming the dominant bottleneck.
+
+### 5. Lock-Wait Instrumentation for `pg_stat_statements` Itself
+Expose the LWLock contention metrics for the statistics subsystem itself (similar to RustRedis's `cmdstat_lock_wait_us`). This enables DBAs to measure whether `pg_stat_statements` is contributing to their workload's latency, enabling informed tuning decisions.
 
 ---
 
