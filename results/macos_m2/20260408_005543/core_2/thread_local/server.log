@@ -1,0 +1,11 @@
+    Finished `release` profile [optimized] target(s) in 0.02s
+     Running `target/release/server`
+[2m2026-04-07T19:25:54.451756Z[0m [32m INFO[0m ThreadId(01) Pub/Sub system initialized
+[2m2026-04-07T19:25:54.451916Z[0m [32m INFO[0m ThreadId(01) Metrics system initialized
+[2m2026-04-07T19:25:54.451965Z[0m [32m INFO[0m ThreadId(01) Command metrics initialized (strategy: thread_local_batched)
+[2m2026-04-07T19:25:54.452055Z[0m [32m INFO[0m ThreadId(01) Thread-local metrics flush task started (100ms interval)
+[2m2026-04-07T19:25:54.452176Z[0m [32m INFO[0m ThreadId(01) AOF persistence enabled with EverySecond sync policy
+[2m2026-04-07T19:25:54.806558Z[0m [32m INFO[0m ThreadId(01) Loaded 789188 commands from AOF
+[2m2026-04-07T19:25:54.999185Z[0m [32m INFO[0m ThreadId(01) AOF replay completed
+[2m2026-04-07T19:25:54.999274Z[0m [32m INFO[0m ThreadId(01) RustRedis server listening on 127.0.0.1:6379
+[2m2026-04-07T19:25:54.999284Z[0m [32m INFO[0m ThreadId(01) Press CTRL+C to shutdown gracefully
