@@ -1,0 +1,57 @@
+    Finished `release` profile [optimized] target(s) in 0.04s
+     Running `target/release/rustredis-bench --host 127.0.0.1 --port 6379 --concurrency 100,500,1000 --requests 10000 --runs 3 --workload mixed --key-space 10000 --value-size 64 --metrics-strategy thread_local --output-dir results/metrics_strategy_mandatory/20260408_010639/thread_local`
+╔══════════════════════════════════════════════════════════════╗
+║           RustRedis Benchmark Suite v1.0                    ║
+╚══════════════════════════════════════════════════════════════╝
+
+Testing connection to 127.0.0.1:6379... ✓ Connected
+Runs per configuration: 3 (mean ± stddev)
+
+━━━ Mixed (50% GET / 50% SET) ━━━
+    100 clients ×   10000 ops × 3 runs ...  129197 ± 20551 ops/sec (CV=15.9%) | p50=686±67µs  p99=1992±754µs
+    500 clients ×   10000 ops × 3 runs ...   95492 ± 40098 ops/sec (CV=42.0%) | p50=1345±541µs  p99=4622±1403µs
+   1000 clients ×   10000 ops × 3 runs ...   95000 ± 18842 ops/sec (CV=19.8%) | p50=2837±661µs  p99=17455±18233µs
+
+✓ Results saved to results/metrics_strategy_mandatory/20260408_010639/thread_local/benchmark_results.json
+
+╔═══════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║                              BENCHMARK SUMMARY (mean ± stddev, n=3)                               ║
+╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣
+║ Target   │ Workload                       │            ops/sec │        p50(µs) │        p99(µs) ║
+╟──────────┼────────────────────────────────┼────────────────────┼────────────────┼────────────────╢
+║ RustRedis@c100 │ Mixed (50% GET / 50% SET)      │   129197 ± 20551  │    686 ± 67    │   1992 ± 754   ║
+║ RustRedis@c500 │ Mixed (50% GET / 50% SET)      │    95492 ± 40098  │   1345 ± 541   │   4622 ± 1403  ║
+║ RustRedis@c1000 │ Mixed (50% GET / 50% SET)      │    95000 ± 18842  │   2837 ± 661   │  17455 ± 18233 ║
+╚═══════════════════════════════════════════════════════════════════════════════════════════════════════╝
+
+━━━ Metrics Strategy Comparison ━━━
+Current server strategy: thread_local
+  (restart server with RUSTREDIS_METRICS_STRATEGY=<strategy> for each comparison)
+
+  Strategy: thread_local         | 100 clients × 10000 ops × 3 runs ...  134695 ± 4849  ops/sec | p99=2496±1275µs
+
+  Per-command stats (from CMDSTAT):
+    # CommandStats (strategy: thread_local_batched)
+    cmdstat_flushdb:calls=12,total_time_us=2470,avg_time_us=205.83,min_time_us=158,max_time_us=395
+    cmdstat_get:calls=56367,total_time_us=186550,avg_time_us=3.31,min_time_us=0,max_time_us=8796
+    cmdstat_ping:calls=2,total_time_us=18,avg_time_us=9.00,min_time_us=8,max_time_us=10
+    cmdstat_set:calls=56506,total_time_us=300939,avg_time_us=5.33,min_time_us=1,max_time_us=22337
+
+  ┌─── Metrics Strategy Comparison Guide ────────────────────┐
+  │ To compare strategies, run this benchmark 4 times:      │
+  │                                                         │
+  │ 1. RUSTREDIS_METRICS_STRATEGY=disabled                  │
+  │    cargo run --release --bin server                      │
+  │    cargo run --release -- --metrics-strategy disabled    │
+  │                                                         │
+  │ 2. RUSTREDIS_METRICS_STRATEGY=global_mutex              │
+  │    (repeat server + benchmark)                          │
+  │                                                         │
+  │ 3. RUSTREDIS_METRICS_STRATEGY=sharded                   │
+  │    (repeat server + benchmark)                          │
+  │                                                         │
+  │ 4. RUSTREDIS_METRICS_STRATEGY=thread_local              │
+  │    (repeat server + benchmark)                          │
+  │                                                         │
+  │ Compare ops/sec and p99 across runs to measure overhead │
+  └─────────────────────────────────────────────────────────┘

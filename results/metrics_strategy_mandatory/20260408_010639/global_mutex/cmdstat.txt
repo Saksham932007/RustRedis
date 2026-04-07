@@ -1,0 +1,10 @@
+# CommandStats (strategy: global_mutex)
+cmdstat_cmdstat:calls=1,total_time_us=12,avg_time_us=12.00,min_time_us=12,max_time_us=12
+cmdstat_flushdb:calls=12,total_time_us=4722,avg_time_us=393.50,min_time_us=167,max_time_us=2661
+cmdstat_get:calls=60040,total_time_us=379633,avg_time_us=6.32,min_time_us=0,max_time_us=45574
+cmdstat_ping:calls=2,total_time_us=25,avg_time_us=12.50,min_time_us=12,max_time_us=13
+cmdstat_set:calls=59960,total_time_us=379990,avg_time_us=6.34,min_time_us=1,max_time_us=26496
+
+# Contention
+cmdstat_lock_wait_us:74304
+
