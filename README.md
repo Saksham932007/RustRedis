@@ -203,6 +203,29 @@ The benchmark suite (`benchmarks/src/main.rs`) is a custom load generator that e
 
 **Metrics strategy benchmarking.** To compare telemetry overhead across strategies, the server is restarted with each `RUSTREDIS_METRICS_STRATEGY` environment variable (`disabled`, `global_mutex`, `sharded`, `thread_local`), and the benchmark is run with `--metrics-strategy <name>`. After each run, `CMDSTAT` output is fetched to verify per-command statistics are being recorded. All four strategies are compared at the same concurrency level and workload mix to isolate telemetry overhead from other variables.
 
+### MacOS (Apple Silicon) Reproducible Research Run
+
+For paper-quality runs on an M-series Mac, use the automation scripts in `benchmarks/`:
+
+```bash
+# 1) Build once
+cargo build --release --bin server
+cargo build --release --manifest-path benchmarks/Cargo.toml
+
+# 2) Run 2-core, 4-core, and 8-core experiments (5 runs each by default)
+./benchmarks/run_macos_m2_research.sh
+
+# 3) Summarize to a single CSV
+python3 benchmarks/summarize_macos_m2_results.py \
+  --input results/macos_m2/<timestamp> \
+  --output results/macos_m2/<timestamp>/summary.csv
+```
+
+The run script keeps workload fixed and restarts the server between configurations, collecting:
+- Throughput, p50, p99, and stddev (from `benchmark_results.json`)
+- `CMDSTAT` snapshots for contention analysis (`cmdstat.txt`)
+- Machine metadata (`machine_details.txt`)
+
 ### Statistical Methodology
 
 Results report the **mean ± standard deviation** from 3 independent runs per configuration (`--runs 3`).
