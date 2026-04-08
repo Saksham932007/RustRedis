@@ -12,9 +12,9 @@ The project includes a custom benchmarking framework, systematic failure analysi
 
 Secondary questions:
 
--   How does performance stability (variance) differ between a multi-threaded runtime and a single-threaded event loop?
--   What is the throughput cost of AOF persistence with different fsync policies?
--   At what concurrency level does lock contention become the dominant bottleneck?
+- How does performance stability (variance) differ between a multi-threaded runtime and a single-threaded event loop?
+- What is the throughput cost of AOF persistence with different fsync policies?
+- At what concurrency level does lock contention become the dominant bottleneck?
 
 ---
 
@@ -66,10 +66,10 @@ A single `std::sync::Mutex<HashMap<&str, CommandStat>>` protects all per-command
 
 **Characteristics:**
 
--   Simplest implementation
--   Maximum contention — all command updates serialize through one lock
--   Lock convoy effect under high concurrency: threads that hold the lock briefly are queued behind threads that hold it longer
--   Useful as a baseline for measuring contention overhead
+- Simplest implementation
+- Maximum contention — all command updates serialize through one lock
+- Lock convoy effect under high concurrency: threads that hold the lock briefly are queued behind threads that hold it longer
+- Useful as a baseline for measuring contention overhead
 
 ### Strategy B: Sharded (`sharded`)
 
@@ -77,10 +77,10 @@ Uses `DashMap<&str, CommandStat>` which internally partitions entries across N s
 
 **Characteristics:**
 
--   Significantly reduced contention vs global mutex
--   Parallel updates for different commands (GET and SET can update simultaneously)
--   Still serializes concurrent updates to the *same* command type within a shard
--   Default strategy — best balance of accuracy and performance
+- Significantly reduced contention vs global mutex
+- Parallel updates for different commands (GET and SET can update simultaneously)
+- Still serializes concurrent updates to the _same_ command type within a shard
+- Default strategy — best balance of accuracy and performance
 
 ### Strategy C: Thread-Local Batched (`thread_local`)
 
