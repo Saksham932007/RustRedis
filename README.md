@@ -297,51 +297,49 @@ DashMap's sharded locking distributes write contention across N shards (N defaul
 
 ### Metrics System Overhead Analysis
 
-The per-command telemetry system (`CMDSTAT`) adds instrumentation to the hot path. The following table compares the three metrics collection strategies against a baseline with telemetry disabled, measured at 100 concurrent clients with a mixed workload (50% GET / 50% SET):
+The per-command telemetry system (`CMDSTAT`) adds instrumentation to the hot path. The tables below include the fresh data collected in commits `52e4a24`, `339b365`, and the formatting correction in `1eb1d8a`.
 
-| Strategy | Throughput (ops/sec) | p99 Latency (µs) | Overhead vs Disabled |
-|:--------:|:--------------------:|:-----------------:|:--------------------:|
-| Disabled | ~70,000 | ~900 | 0% (baseline) |
-| GlobalMutex | ~52,000 | ~2,200 | **+26% degradation** |
-| Sharded (DashMap) | ~66,000 | ~1,100 | +5% degradation |
-| ThreadLocalBatched | ~69,000 | ~950 | **<2% degradation** |
+Fresh dataset A (core_2, runs=5, mixed workload) from `results/macos_m2/20260408_005543`:
 
-At **1,000 concurrent clients** (contention-dominated regime):
+| Strategy | Clients | Throughput mean ± stddev (ops/sec) | p99 mean ± stddev (µs) | Total Errors |
+|:--------:|:-------:|:----------------------------------:|:----------------------:|:------------:|
+| GlobalMutex | 100 | 169,753.67 ± 23,878.50 | 1,315.40 ± 967.02 | 0 |
+| GlobalMutex | 500 | 157,067.66 ± 5,800.40 | 3,623.80 ± 855.04 | 0 |
+| GlobalMutex | 1,000 | 124,016.42 ± 14,658.02 | 7,048.40 ± 3,139.39 | 0 |
+| Sharded (DashMap) | 100 | 154,861.94 ± 21,999.54 | 1,308.40 ± 675.66 | 0 |
+| Sharded (DashMap) | 500 | 138,343.53 ± 12,743.57 | 3,390.60 ± 913.73 | 0 |
+| Sharded (DashMap) | 1,000 | 102,548.31 ± 29,391.57 | 19,267.20 ± 29,601.22 | 2,120 |
 
-| Strategy | Throughput (ops/sec) | p99 Latency (µs) | Overhead vs Disabled |
-|:--------:|:--------------------:|:-----------------:|:--------------------:|
-| Disabled | ~30,000 | ~21,000 | 0% (baseline) |
-| GlobalMutex | ~21,000 | ~35,000 | **+30% degradation** |
-| Sharded (DashMap) | ~28,500 | ~23,000 | +5% degradation |
-| ThreadLocalBatched | ~29,500 | ~21,500 | **<2% degradation** |
+Fresh dataset B (mandatory matrix, runs=3, mixed workload) from `results/metrics_strategy_mandatory/20260408_010639`:
 
-**Key Finding:** At 1,000 concurrent clients, the GlobalMutex telemetry strategy alone causes a 30% throughput drop and 67% p99 latency increase. This overhead is comparable to the storage layer's own mutex contention, demonstrating that **observability infrastructure can become a primary bottleneck in high-throughput systems** when contention is not carefully managed.
+| Strategy | Clients | Throughput mean (ops/sec) | Throughput variance | p99 mean (µs) | p99 variance |
+|:--------:|:-------:|--------------------------:|--------------------:|--------------:|-------------:|
+| GlobalMutex | 100 | 128,427.62 | 738,483,967.62 | 2,481.67 | 1,370,964.33 |
+| GlobalMutex | 500 | 85,309.66 | 921,349,007.43 | 12,181.67 | 93,004,830.33 |
+| GlobalMutex | 1,000 | 75,028.62 | 1,019,132,535.44 | 14,862.33 | 127,218,090.33 |
+| ThreadLocalBatched | 100 | 129,197.41 | 422,333,492.36 | 1,992.00 | 567,777.00 |
+| ThreadLocalBatched | 500 | 95,492.27 | 1,607,847,416.61 | 4,622.00 | 1,969,617.00 |
+| ThreadLocalBatched | 1,000 | 94,999.85 | 355,005,531.33 | 17,454.67 | 332,449,576.33 |
 
-The Sharded strategy recovers most of the lost performance by distributing telemetry lock contention across DashMap's shards. The ThreadLocalBatched strategy eliminates telemetry contention entirely, achieving near-zero overhead at the cost of ~100ms staleness in `CMDSTAT` output.
+Variance formula: `variance = (stddev)^2`.
+
+**Key Finding (fresh mandatory run):** At 1,000 clients, ThreadLocalBatched improves throughput vs GlobalMutex (94,999.85 vs 75,028.62 ops/sec), while p99 remains sensitive to run-to-run variability at this concurrency.
 
 ### Telemetry Contention Measurement
 
 The GlobalMutex strategy instruments the time each thread spends waiting to acquire the telemetry lock. This directly measures the contention cost of the observability hot path:
 
-| Concurrency | Avg Lock Wait (µs) | Max Lock Wait (µs) | Contention Rate |
-|:-----------:|:------------------:|:-------------------:|:---------------:|
-| 1 | ~0 | ~2 | <1% |
-| 10 | ~8 | ~120 | ~5% |
-| 100 | ~45 | ~800 | ~18% |
-| 500 | ~120 | ~2,000 | ~35% |
-| 1,000 | ~250 | ~4,500 | ~48% |
+Observed `CMDSTAT` contention snapshots from the fresh runs:
 
-*Contention Rate = (cumulative lock wait time) / (cumulative command execution time) × 100%*
+| Dataset | Strategy | cmdstat_lock_wait_us |
+|:-------:|:--------:|---------------------:|
+| `results/macos_m2/20260408_005543/core_2` | GlobalMutex | 6,250 |
+| `results/metrics_strategy_mandatory/20260408_010639` | GlobalMutex | 74,304 |
+| `results/metrics_strategy_mandatory/20260408_010639` | ThreadLocalBatched | Not reported (no lock-wait counter) |
 
-Comparative contention across strategies at 1,000 clients:
-
-| Strategy | Avg Lock Wait (µs) | Max Wait (µs) | Contention Rate |
-|:--------:|:------------------:|:-------------:|:---------------:|
-| GlobalMutex | ~250 | ~4,500 | ~48% |
-| Sharded | ~20 | ~400 | ~8% |
-| ThreadLocalBatched | ~0 | ~0 | **0%** |
-
-The ThreadLocalBatched strategy achieves 0% contention on the hot path because all recording happens in thread-local storage — the only synchronization is the periodic flush (every 100ms), which occurs outside the command execution critical path.
+Notes:
+- `results/macos_m2/20260408_005543/core_2/sharded/cmdstat.txt` was empty in the collected artifact.
+- Lock-wait totals are cumulative over the completed benchmark run and should be interpreted together with throughput/latency tables.
 
 ---
 
