@@ -169,6 +169,8 @@ Root-cause analysis from implementation and artifacts:
 
 Conclusion: for this codebase, `thread_local` trades lock convoy risk for stability risk at high concurrency.
 
+Strong insight: removing synchronization shifts cost from contention to coordination and buffering, which can destabilize the system under high load.
+
 ### Usage
 
 ```bash
@@ -301,11 +303,15 @@ Results report the **mean ± standard deviation** from 3 independent runs per co
 
 ## Results
 
+Paper focus: treat the observability sections as primary (`Metrics System Overhead Analysis`, `Telemetry Contention Measurement`, and `Final Clean Matrix`). The general KV, AOF, and Redis-comparison sections are retained as appendix material.
+
 ### Metrics Contention Analysis
 
 ![Metrics contention analysis](metrics_contention_analysis.png)
 
 Figure: Throughput vs Concurrency for three metrics collection strategies (GlobalMutex, Sharded, ThreadLocalBatched).
+
+## Appendix A: General KV Throughput/Latency (Out of Paper Scope)
 
 ### Throughput Scaling
 
@@ -431,6 +437,8 @@ max
 
 Write-heavy p99 latency increases ~20x between 10 and 1,000 clients (1,964 to 24,114 us), consistent with global mutex contention under high write load.
 
+## Appendix B: AOF Persistence (Out of Paper Scope)
+
 ### AOF Persistence Impact
 
 Sync Policy
@@ -466,6 +474,8 @@ No
 OS page cache flush
 
 The EverySecond policy adds approximately 1-5% overhead compared to No persistence, while Always reduces throughput by approximately 80% due to per-operation disk synchronization.
+
+## Appendix C: Storage Locking Comparison (Out of Paper Scope)
 
 ### Mutex vs DashMap
 
@@ -749,6 +759,8 @@ Computed metric definitions:
 
 ### Observability-Only Findings (Paper Focus)
 
+Across all configurations, no single observability strategy dominates. Global synchronization introduces predictable overhead, sharding reduces contention but retains coordination cost, and thread-local batching eliminates synchronization but can destabilize the system under high concurrency. These results demonstrate that observability design is inherently a tradeoff between synchronization overhead and system stability.
+
 This paper should focus on one story:
 
 - Problem: observability overhead is often ignored in throughput studies.
@@ -774,7 +786,7 @@ Machine metadata and all raw outputs are saved under:
 
 ---
 
-## Comparative Evaluation: RustRedis vs Redis
+## Appendix D: RustRedis vs Redis Comparison (Out of Paper Scope)
 
 ### Measured Comparison (Valkey 8.1.4, same hardware, same workloads)
 
@@ -1143,7 +1155,7 @@ The progression from GlobalMutex → Sharded → ThreadLocal precisely mirrors t
 
 ---
 
-## Findings
+## Appendix E: Extended Findings (Out of Paper Scope)
 
 1.  **Performance Stability vs Peak Throughput.** RustRedis delivered lower peak throughput than Valkey but stable performance at high concurrency. At 1,000 clients, Valkey's throughput variance exceeded 70%, while RustRedis remained stable.
 2.  **Multi-threaded I/O prevents tail latency degradation.** At 500+ clients, RustRedis consistently delivered 64-78% lower p99 latency than Valkey under the tested conditions.
@@ -1153,7 +1165,7 @@ The progression from GlobalMutex → Sharded → ThreadLocal precisely mirrors t
 6.  **Sharded locking (DashMap) improves throughput by 60% at 1,000 clients.** DashMap's per-shard locking reduces global contention and delays the throughput degradation curve.
 7.  **AOF `Always` sync reduces throughput by approximately 80%.** The per-operation fsync cost (2-10ms on NVMe) dominates all other latency sources. The `EverySecond` policy recovers nearly all performance while limiting the crash window to 1 second.
 8.  **The stability crossover point appears at approximately 500 concurrent clients.** Below this, Valkey is faster. Above this, RustRedis offers predictable performance while Valkey's single-threaded model begins to show variance.
-9.  **Telemetry overhead is a first-class contention source.** At 1,000 clients, GlobalMutex telemetry adds ~30% throughput degradation and ~48% contention rate. Sharded telemetry reduces this to ~5% overhead. Thread-local batching eliminates it entirely (<2% overhead, 0% contention).
+9.  **Telemetry overhead is a first-class contention source.** At 1,000 clients, GlobalMutex telemetry adds measurable throughput degradation and contention. Sharded telemetry reduces contention but retains coordination cost. Thread-local batching eliminates lock contention on the hot path, but introduces instability under high concurrency in this implementation.
 10. **Observability systems can become primary bottlenecks.** At high concurrency, the telemetry lock wait time rivals the database lock wait time, demonstrating that any synchronized structure on the hot path — even simple counters — can dominate total latency when contention is high.
 
 ---
@@ -1224,7 +1236,7 @@ RustRedis's three strategies directly demonstrate the solution space:
 2.  **Sharded ≈ Partitioned LWLocks**: Reduces collision probability by 1/N per operation
 3.  **ThreadLocalBatched ≈ Per-backend accumulators**: Zero-contention hot path, deferred aggregation
 
-> **This experiment demonstrates that reducing synchronization on the statistics hot path can reduce telemetry contention from ~48% to 0%, recovering ~30% of lost throughput — directly applicable to PostgreSQL's `pg_stat_statements` LWLock bottleneck.**
+> **This experiment demonstrates the core tradeoff: reducing synchronization on the statistics hot path can reduce lock contention, but can shift cost into coordination and buffering paths that destabilize performance under high load.**
 
 ---
 
@@ -1238,7 +1250,7 @@ Replace the single LWLock-protected hash table with N partitions (where N = numb
 
 ### 2. Per-Backend Local Buffers
 
-Each PostgreSQL backend maintains a local `pgss_entry` buffer in its private memory. Statistics accumulate locally with zero synchronization during query execution. This mirrors the ThreadLocalBatched strategy that achieved <2% overhead.
+Each PostgreSQL backend maintains a local `pgss_entry` buffer in its private memory. Statistics accumulate locally with zero synchronization during query execution. This mirrors the ThreadLocalBatched design goal, but the final matrix here shows this implementation becomes unstable at high concurrency and should not be framed as universally low-overhead.
 
 ### 3. Deferred Aggregation
 
