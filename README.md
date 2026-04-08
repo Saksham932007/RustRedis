@@ -88,9 +88,9 @@ Each Tokio worker thread maintains its own `thread_local!` counters. Records acc
 
 **Characteristics:**
 
-- Near-zero overhead on the hot path (no atomic operations, no locks)
-- Eventual consistency — `CMDSTAT` output may lag by up to 100ms
-- Solves the lock convoy effect entirely by removing synchronization from the hot path
+- Lower lock contention on paper, but not stable at high concurrency in final matrix runs
+- Uses eventual consistency — `CMDSTAT` output can lag and may miss in-flight thread-local data
+- Introduces a global coordination point (`records_since_flush`) and batch queue synchronization
 - Slightly higher memory usage (one HashMap per worker thread)
 
 ### Contention Analysis & Performance Comparison
@@ -119,7 +119,7 @@ GlobalMutex
 
 Global lock
 
-~5-15% at high concurrency
+~0-21% in final matrix (can be noisy)
 
 **High**
 
@@ -129,7 +129,7 @@ Sharded
 
 Per-shard lock
 
-~1-3%
+~2-37% in final matrix (workload-dependent)
 
 Low
 
@@ -139,26 +139,35 @@ ThreadLocalBatched
 
 None
 
-<1%
+Unstable; up to +100% overhead with request failures
 
 **None**
 
 ~100ms lag
 
-At **1,000 concurrent clients**, the GlobalMutex strategy can exhibit measurable throughput degradation because every command execution contends on a single lock — this mirrors the same lock convoy problem observed in the database layer's `Mutex<HashMap>`. The Sharded strategy reduces this by distributing contention across DashMap's shards. The ThreadLocalBatched strategy eliminates telemetry-induced contention entirely by deferring aggregation to a background task.
+In the final matrix, the expected "thread-local is always better" result did not hold. At high concurrency, `thread_local` showed severe instability and request failures, while `global_mutex` and `sharded` remained serviceable.
 
-### How Thread-Local Batching Solves the Lock Convoy Effect
+### Why Thread-Local Failed In Final Matrix
 
-The **lock convoy effect** occurs when multiple threads compete for a single lock in a tight loop. Even when each critical section is short, the overhead of lock handoff (cache line invalidation, context switches, scheduler wake-ups) causes throughput to degrade non-linearly with thread count.
+The final matrix demonstrates that `thread_local` is not production-stable in this implementation:
 
-Thread-local batching eliminates this by partitioning the write path:
+- 4-core, 500 clients: `+69.60%` overhead, `15,960` errors
+- 4-core, 1000 clients: `0` throughput, `30,000` errors
+- 8-core, 500 clients: `+86.95%` overhead, `15,980` errors
+- 8-core, 1000 clients: effectively broken (`11.26 ops/sec`, `29,980` errors)
 
-1.  Each worker thread writes to its own `HashMap` via `thread_local!` — no synchronization needed
-2.  Batches are flushed periodically (every 100ms) by a single background Tokio task
-3.  The flush acquires a lock only once per interval, amortizing synchronization cost across thousands of records
-4.  The hot path (command execution → metric recording) never blocks on any lock
+Root-cause analysis from implementation and artifacts:
 
-This is the same principle used by high-performance logging frameworks (e.g., `spdlog`'s async logger) and hardware performance counters.
+1. Background flush cannot directly drain all worker-thread local maps.
+	The flusher drains only `pending_batches`, while each worker's local map is moved only when that worker calls `push_local_batch()`.
+2. Flush triggering is globally coordinated (`records_since_flush`) but the actual drain is per-current-thread.
+	This creates uneven draining and stale accumulation behavior under heavy connection churn.
+3. Observability path still contains shared synchronization (`pending_batches` mutex + global atomic counter).
+	Under high concurrency, this coordination can amplify scheduler pressure instead of reducing it.
+4. Failure signature is runtime collapse, not clean crash.
+	Server logs show no panic, while benchmark results show progressive request failures and near-zero completed operations.
+
+Conclusion: for this codebase, `thread_local` trades lock convoy risk for stability risk at high concurrency.
 
 ### Usage
 
@@ -652,7 +661,7 @@ ThreadLocalBatched
 
 Variance formula: `variance = (stddev)^2`.
 
-**Key Finding (fresh mandatory run):** At 1,000 clients, ThreadLocalBatched improves throughput vs GlobalMutex (94,999.85 vs 75,028.62 ops/sec), while p99 remains sensitive to run-to-run variability at this concurrency.
+**Key Finding (final matrix supersedes earlier mandatory run):** `thread_local` does **not** improve throughput at high concurrency in the current implementation. It becomes unstable at 500 clients and collapses by 1000 clients (large error counts and near-zero useful throughput).
 
 ### Telemetry Contention Measurement
 
@@ -737,6 +746,25 @@ Computed metric definitions:
 
 - `Throughput CV = throughput_stddev / throughput_mean`
 - `p99 CV = p99_stddev / p99_mean`
+
+### Observability-Only Findings (Paper Focus)
+
+This paper should focus on one story:
+
+- Problem: observability overhead is often ignored in throughput studies.
+- Observation: telemetry itself can become a bottleneck or destabilizer under high concurrency.
+- Experiment: compare `global_mutex`, `sharded`, and `thread_local` against `disabled` baseline across core and client scales.
+- Result: contention-vs-stability tradeoff, not a single universally best strategy.
+
+High-level conclusion from final matrix:
+
+- `global_mutex`: predictable, moderate overhead.
+- `sharded`: better contention profile than global lock in many cases, with lower failure risk than current thread-local implementation.
+- `thread_local`: unstable in this implementation at 500+ clients; not safe to claim as a general optimization.
+
+### Scope Clarification
+
+Redis-vs-RustRedis and AOF persistence experiments are useful supporting material, but they are **out of scope for the main observability bottleneck claim** and should be treated as secondary appendices when writing the paper narrative.
 
 Machine metadata and all raw outputs are saved under:
 
