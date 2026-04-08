@@ -159,13 +159,13 @@ The final matrix demonstrates that `thread_local` is not production-stable in th
 Root-cause analysis from implementation and artifacts:
 
 1. Background flush cannot directly drain all worker-thread local maps.
-	The flusher drains only `pending_batches`, while each worker's local map is moved only when that worker calls `push_local_batch()`.
+   The flusher drains only `pending_batches`, while each worker's local map is moved only when that worker calls `push_local_batch()`.
 2. Flush triggering is globally coordinated (`records_since_flush`) but the actual drain is per-current-thread.
-	This creates uneven draining and stale accumulation behavior under heavy connection churn.
+   This creates uneven draining and stale accumulation behavior under heavy connection churn.
 3. Observability path still contains shared synchronization (`pending_batches` mutex + global atomic counter).
-	Under high concurrency, this coordination can amplify scheduler pressure instead of reducing it.
+   Under high concurrency, this coordination can amplify scheduler pressure instead of reducing it.
 4. Failure signature is runtime collapse, not clean crash.
-	Server logs show no panic, while benchmark results show progressive request failures and near-zero completed operations.
+   Server logs show no panic, while benchmark results show progressive request failures and near-zero completed operations.
 
 Conclusion: for this codebase, `thread_local` trades lock convoy risk for stability risk at high concurrency.
 
