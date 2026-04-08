@@ -88,10 +88,10 @@ Each Tokio worker thread maintains its own `thread_local!` counters. Records acc
 
 **Characteristics:**
 
--   Near-zero overhead on the hot path (no atomic operations, no locks)
--   Eventual consistency — `CMDSTAT` output may lag by up to 100ms
--   Solves the lock convoy effect entirely by removing synchronization from the hot path
--   Slightly higher memory usage (one HashMap per worker thread)
+- Near-zero overhead on the hot path (no atomic operations, no locks)
+- Eventual consistency — `CMDSTAT` output may lag by up to 100ms
+- Solves the lock convoy effect entirely by removing synchronization from the hot path
+- Slightly higher memory usage (one HashMap per worker thread)
 
 ### Contention Analysis & Performance Comparison
 
@@ -212,9 +212,9 @@ Release mode (`--release`, LTO disabled)
 
 ### Tokio Runtime Configuration
 
--   **Flavor**: `multi_thread`
--   **Worker Threads**: Defaults to number of CPU cores (4 on test machine)
--   **Scheduling**: Cooperative multitasking with default time slice
+- **Flavor**: `multi_thread`
+- **Worker Threads**: Defaults to number of CPU cores (4 on test machine)
+- **Scheduling**: Cooperative multitasking with default time slice
 
 ### Benchmark Methodology
 
@@ -276,17 +276,17 @@ For paper-quality runs on an M-series Mac, use the automation scripts in `benchm
 
 The run script keeps workload fixed and restarts the server between configurations, collecting:
 
--   Throughput, p50, p99, and stddev (from `benchmark_results.json`)
--   `CMDSTAT` snapshots for contention analysis (`cmdstat.txt`)
--   Machine metadata (`machine_details.txt`)
+- Throughput, p50, p99, and stddev (from `benchmark_results.json`)
+- `CMDSTAT` snapshots for contention analysis (`cmdstat.txt`)
+- Machine metadata (`machine_details.txt`)
 
 ### Statistical Methodology
 
 Results report the **mean ± standard deviation** from 3 independent runs per configuration (`--runs 3`).
 
--   **Latency**: Percentiles (p50, p99) computed from full latency histograms per run, then averaged.
--   **Throughput**: Computed as total operations / total duration per run, then averaged.
--   **Variance Analysis**: Coefficient of Variation (CV) is monitored to detect instability. Valkey exhibited extreme variance (>100% CV) at c=1000, indicating system instability.
+- **Latency**: Percentiles (p50, p99) computed from full latency histograms per run, then averaged.
+- **Throughput**: Computed as total operations / total duration per run, then averaged.
+- **Variance Analysis**: Coefficient of Variation (CV) is monitored to detect instability. Valkey exhibited extreme variance (>100% CV) at c=1000, indicating system instability.
 
 ---
 
@@ -686,8 +686,63 @@ Not reported (no lock-wait counter)
 
 Notes:
 
--   `results/macos_m2/20260408_005543/core_2/sharded/cmdstat.txt` was empty in the collected artifact.
--   Lock-wait totals are cumulative over the completed benchmark run and should be interpreted together with throughput/latency tables.
+- `results/macos_m2/20260408_005543/core_2/sharded/cmdstat.txt` was empty in the collected artifact.
+- Lock-wait totals are cumulative over the completed benchmark run and should be interpreted together with throughput/latency tables.
+
+### Final Clean Matrix (Gap Closure)
+
+The full baseline-inclusive matrix has now been executed on the same machine/day with one controlled setup:
+
+- Core setups: `4-core`, `8-core` (Tokio worker threads)
+- Strategies: `disabled`, `global_mutex`, `sharded`, `thread_local`
+- Clients: `100`, `500`, `1000`
+- Workload: `mixed` (50% GET / 50% SET)
+- Runs per configuration: `3`
+- Artifact root: `results/final_matrix/20260408_154844`
+
+Canonical figure (throughput + p99 panels):
+
+![Observability Cost vs Concurrency](results/final_matrix/20260408_154844/observability_cost_vs_concurrency.png)
+
+Summary table (mean +- stddev, CV, overhead vs Disabled):
+
+| Core   | Strategy     | Clients | Throughput mean +- stddev | p99 mean +- stddev (us) | Throughput CV | p99 CV | Overhead vs Disabled | p99 delta vs Disabled | Errors |
+| ------ | ------------ | ------: | ------------------------: | ----------------------: | ------------: | -----: | -------------------: | --------------------: | -----: |
+| 4-core | disabled     |     100 |     143632.37 +- 12448.67 |       1741.67 +- 626.30 |         0.087 |  0.360 |               +0.00% |                +0.00% |      0 |
+| 4-core | global_mutex |     100 |     138056.73 +- 25613.60 |       1727.33 +- 772.59 |         0.186 |  0.447 |               +3.88% |                -0.82% |      0 |
+| 4-core | sharded      |     100 |      90411.06 +- 39952.25 |      4952.67 +- 3063.43 |         0.442 |  0.619 |              +37.05% |              +184.36% |      0 |
+| 4-core | thread_local |     100 |      82123.91 +- 30970.99 |      9815.00 +- 9161.58 |         0.377 |  0.933 |              +42.82% |              +463.54% |      0 |
+| 4-core | disabled     |     500 |     125881.07 +- 45951.43 |       4109.00 +- 871.34 |         0.365 |  0.212 |               +0.00% |                +0.00% |      0 |
+| 4-core | global_mutex |     500 |     114389.20 +- 34969.32 |       3441.00 +- 158.19 |         0.306 |  0.046 |               +9.13% |               -16.26% |      0 |
+| 4-core | sharded      |     500 |     106670.78 +- 57129.70 |      9307.67 +- 8193.05 |         0.536 |  0.880 |              +15.26% |              +126.52% |      0 |
+| 4-core | thread_local |     500 |      38272.14 +- 43719.03 |    38717.00 +- 63943.61 |         1.142 |  1.652 |              +69.60% |              +842.25% |  15960 |
+| 4-core | disabled     |    1000 |      128389.02 +- 1508.38 |       5285.00 +- 398.98 |         0.012 |  0.075 |               +0.00% |                +0.00% |      0 |
+| 4-core | global_mutex |    1000 |     105088.07 +- 18144.92 |       5521.67 +- 820.80 |         0.173 |  0.149 |              +18.15% |                +4.48% |      0 |
+| 4-core | sharded      |    1000 |      91352.13 +- 35453.37 |    20179.67 +- 26596.99 |         0.388 |  1.318 |              +28.85% |              +281.83% |      0 |
+| 4-core | thread_local |    1000 |              0.00 +- 0.00 |            0.00 +- 0.00 |         0.000 |  0.000 |             +100.00% |              -100.00% |  30000 |
+| 8-core | disabled     |     100 |     136655.09 +- 14670.27 |       1920.00 +- 831.38 |         0.107 |  0.433 |               +0.00% |                +0.00% |      0 |
+| 8-core | global_mutex |     100 |     135929.94 +- 21008.12 |       1676.67 +- 480.22 |         0.155 |  0.286 |               +0.53% |               -12.67% |      0 |
+| 8-core | sharded      |     100 |     132813.11 +- 24009.25 |       2216.67 +- 973.90 |         0.181 |  0.439 |               +2.81% |               +15.45% |      0 |
+| 8-core | thread_local |     100 |     133243.34 +- 19785.69 |       1920.67 +- 852.34 |         0.148 |  0.444 |               +2.50% |                +0.03% |      0 |
+| 8-core | disabled     |     500 |     136904.73 +- 15681.26 |      5399.00 +- 1054.67 |         0.115 |  0.195 |               +0.00% |                +0.00% |      0 |
+| 8-core | global_mutex |     500 |     116518.53 +- 23648.43 |      6698.33 +- 4937.92 |         0.203 |  0.737 |              +14.89% |               +24.07% |      0 |
+| 8-core | sharded      |     500 |     126927.29 +- 32057.34 |       4306.67 +- 795.95 |         0.253 |  0.185 |               +7.29% |               -20.23% |      0 |
+| 8-core | thread_local |     500 |      17860.39 +- 17564.46 |    71060.00 +- 87990.31 |         0.983 |  1.238 |              +86.95% |             +1216.17% |  15980 |
+| 8-core | disabled     |    1000 |      97064.92 +- 39319.73 |       6293.67 +- 509.51 |         0.405 |  0.081 |               +0.00% |                +0.00% |      0 |
+| 8-core | global_mutex |    1000 |     117447.35 +- 14885.43 |       5506.67 +- 503.51 |         0.127 |  0.091 |              -21.00% |               -12.50% |      0 |
+| 8-core | sharded      |    1000 |      103494.09 +- 9051.53 |      7680.67 +- 2505.74 |         0.087 |  0.326 |               -6.62% |               +22.04% |      0 |
+| 8-core | thread_local |    1000 |            11.26 +- 19.50 |   72800.00 +- 126093.30 |         1.732 |  1.732 |              +99.99% |             +1056.72% |  29980 |
+
+Computed metric definitions:
+
+- `Throughput CV = throughput_stddev / throughput_mean`
+- `p99 CV = p99_stddev / p99_mean`
+
+Machine metadata and all raw outputs are saved under:
+
+- `results/final_matrix/20260408_154844/machine_details.txt`
+- `results/final_matrix/20260408_154844/core_4/*`
+- `results/final_matrix/20260408_154844/core_8/*`
 
 ---
 
@@ -809,23 +864,23 @@ Delta
 
 29,550
 
-45,757*
+45,757\*
 
 -35%
 
 30,646
 
-22,628*
+22,628\*
 
 **+35%**
 
 29,604
 
-21,530*
+21,530\*
 
 **+37%**
 
-*> Note: Valkey results at 1,000 clients exhibited high variance (Standard Deviation ~70-100% of mean), indicating performance instability under these specific conditions. RustRedis remained stable (SD < 10%).*
+_> Note: Valkey results at 1,000 clients exhibited high variance (Standard Deviation ~70-100% of mean), indicating performance instability under these specific conditions. RustRedis remained stable (SD < 10%)._
 
 #### Tail Latency p99 (microseconds)
 
@@ -965,7 +1020,7 @@ Delta
 
 ### Configuration Disclaimer
 
-*Note: Redis/Valkey configuration was used with default settings (e.g., standard TCP backlog, I/O threads disabled). Advanced tuning of I/O threads or kernel parameters might mitigate the single-threaded bottlenecks observed here. Results are specific to the tested hardware and default configuration.*
+_Note: Redis/Valkey configuration was used with default settings (e.g., standard TCP backlog, I/O threads disabled). Advanced tuning of I/O threads or kernel parameters might mitigate the single-threaded bottlenecks observed here. Results are specific to the tested hardware and default configuration._
 
 ---
 
@@ -1063,25 +1118,15 @@ The progression from GlobalMutex → Sharded → ThreadLocal precisely mirrors t
 ## Findings
 
 1.  **Performance Stability vs Peak Throughput.** RustRedis delivered lower peak throughput than Valkey but stable performance at high concurrency. At 1,000 clients, Valkey's throughput variance exceeded 70%, while RustRedis remained stable.
-    
 2.  **Multi-threaded I/O prevents tail latency degradation.** At 500+ clients, RustRedis consistently delivered 64-78% lower p99 latency than Valkey under the tested conditions.
-    
 3.  **Sharded locking (DashMap) vs Single Thread.** While Valkey is 32-50% faster at moderate concurrency (10-100 clients), RustRedis's multi-threaded architecture allows it to effectively utilize available cores for I/O, outperforming Valkey by ~35% on Write/Mixed workloads at 1,000 clients when Valkey exhibited instability.
-    
 4.  **Tail latency advantage inverts at 500+ clients.** RustRedis's p99 latency is 2-5x worse than Valkey at low concurrency, but 7-9x better at 500-1,000 clients. Valkey's p99 reaches 67-102 ms at 500 clients; RustRedis stays at 6-14 ms.
-    
 5.  **Valkey is 32-60% faster at moderate concurrency (10-100 clients).** The single-threaded event loop avoids lock overhead entirely, and C-level optimizations (jemalloc, dual encodings, hand-tuned parser) provide consistent throughput advantages in the non-contended regime.
-    
 6.  **Sharded locking (DashMap) improves throughput by 60% at 1,000 clients.** DashMap's per-shard locking reduces global contention and delays the throughput degradation curve.
-    
 7.  **AOF `Always` sync reduces throughput by approximately 80%.** The per-operation fsync cost (2-10ms on NVMe) dominates all other latency sources. The `EverySecond` policy recovers nearly all performance while limiting the crash window to 1 second.
-    
 8.  **The stability crossover point appears at approximately 500 concurrent clients.** Below this, Valkey is faster. Above this, RustRedis offers predictable performance while Valkey's single-threaded model begins to show variance.
-    
 9.  **Telemetry overhead is a first-class contention source.** At 1,000 clients, GlobalMutex telemetry adds ~30% throughput degradation and ~48% contention rate. Sharded telemetry reduces this to ~5% overhead. Thread-local batching eliminates it entirely (<2% overhead, 0% contention).
-    
-10.  **Observability systems can become primary bottlenecks.** At high concurrency, the telemetry lock wait time rivals the database lock wait time, demonstrating that any synchronized structure on the hot path — even simple counters — can dominate total latency when contention is high.
-     
+10. **Observability systems can become primary bottlenecks.** At high concurrency, the telemetry lock wait time rivals the database lock wait time, demonstrating that any synchronized structure on the hot path — even simple counters — can dominate total latency when contention is high.
 
 ---
 
@@ -1141,9 +1186,9 @@ Instrumentation point in execution pipeline
 
 In PostgreSQL, `pg_stat_statements` uses a single **LWLock** to protect its shared-memory hash table. Under high-throughput OLTP workloads (thousands of concurrent backends executing simple queries), this lock becomes a **significant contention point**:
 
--   Each backend must acquire the LWLock in exclusive mode to update its statement's counters after every query execution
--   At high concurrency, backends spend increasing time in `LWLockAcquire()` spinning or sleeping
--   This manifests as increased query latency and reduced throughput — identical to what RustRedis measures with its GlobalMutex strategy
+- Each backend must acquire the LWLock in exclusive mode to update its statement's counters after every query execution
+- At high concurrency, backends spend increasing time in `LWLockAcquire()` spinning or sleeping
+- This manifests as increased query latency and reduced throughput — identical to what RustRedis measures with its GlobalMutex strategy
 
 RustRedis's three strategies directly demonstrate the solution space:
 
@@ -1245,11 +1290,11 @@ These limitations are intentional scope constraints for an experimental system. 
 
 ## Future Work
 
--   **Sharded database with per-shard AOF**: Partition the key space across N independent `HashMap` instances with dedicated AOF files, enabling parallel persistence and reducing cross-shard coordination.
--   **Group commit optimization**: Batch multiple write commands into a single fsync call, amortizing disk synchronization cost across operations.
--   **Actor model redesign**: Replace shared-state concurrency with per-shard actor tasks communicating via bounded channels, eliminating locks entirely.
--   **Leader-follower replication**: Implement TCP-based command forwarding to replica nodes with offset tracking for partial resync.
--   **Formal benchmarking methodology**: Multiple runs with confidence intervals, isolated benchmark client, and perf-stat hardware counter analysis (cache misses, branch mispredictions).
+- **Sharded database with per-shard AOF**: Partition the key space across N independent `HashMap` instances with dedicated AOF files, enabling parallel persistence and reducing cross-shard coordination.
+- **Group commit optimization**: Batch multiple write commands into a single fsync call, amortizing disk synchronization cost across operations.
+- **Actor model redesign**: Replace shared-state concurrency with per-shard actor tasks communicating via bounded channels, eliminating locks entirely.
+- **Leader-follower replication**: Implement TCP-based command forwarding to replica nodes with offset tracking for partial resync.
+- **Formal benchmarking methodology**: Multiple runs with confidence intervals, isolated benchmark client, and perf-stat hardware counter analysis (cache misses, branch mispredictions).
 
 ---
 
@@ -1257,9 +1302,9 @@ These limitations are intentional scope constraints for an experimental system. 
 
 ### Prerequisites
 
--   Rust 1.70+ (tested with 1.92.0)
--   `redis-cli` for interactive testing
--   Python 3 with `matplotlib` and `numpy` for graph generation
+- Rust 1.70+ (tested with 1.92.0)
+- `redis-cli` for interactive testing
+- Python 3 with `matplotlib` and `numpy` for graph generation
 
 ### Quick Start
 
@@ -1445,4 +1490,4 @@ MIT License. See LICENSE file for details.
 
 ---
 
-*This project accompanies the technical report [`docs/system-design.md`](docs/system-design.md) and failure analysis [`docs/failure-analysis.md`](docs/failure-analysis.md).*
+_This project accompanies the technical report [`docs/system-design.md`](docs/system-design.md) and failure analysis [`docs/failure-analysis.md`](docs/failure-analysis.md)._
