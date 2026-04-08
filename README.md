@@ -356,34 +356,39 @@ Notes:
 The current README includes fresh measurements, but the following gaps are still critical for a strong submission-ready paper.
 
 1. Missing Disabled baseline
-  - Severity: VERY HIGH.
-  - Current issue: comparisons show "bad vs better" strategies, but not the true cost of observability itself.
-  - Reviewer risk: "How do we know telemetry is the bottleneck at all?"
-  - Required fix: include disabled vs global_mutex vs sharded vs thread_local in the same matrix.
+
+- Severity: VERY HIGH.
+- Current issue: comparisons show "bad vs better" strategies, but not the true cost of observability itself.
+- Reviewer risk: "How do we know telemetry is the bottleneck at all?"
+- Required fix: include disabled vs global_mutex vs sharded vs thread_local in the same matrix.
 
 2. Missing Sharded in the clean mandatory matrix
-  - Severity: HIGH.
-  - Current issue: clean matrix has GlobalMutex vs ThreadLocalBatched, while Sharded appears only in separate/noisier results.
-  - Reviewer risk: the evolutionary claim (Global -> Sharded -> ThreadLocal) is not directly demonstrated in one clean comparison.
-  - Required fix: run Sharded in the mandatory matrix and report side-by-side with the other strategies.
+
+- Severity: HIGH.
+- Current issue: clean matrix has GlobalMutex vs ThreadLocalBatched, while Sharded appears only in separate/noisier results.
+- Reviewer risk: the evolutionary claim (Global -> Sharded -> ThreadLocal) is not directly demonstrated in one clean comparison.
+- Required fix: run Sharded in the mandatory matrix and report side-by-side with the other strategies.
 
 3. Missing core scaling (4-core vs 8-core)
-  - Severity: MEDIUM-HIGH.
-  - Current issue: contention-vs-concurrency claims are not yet paired with hardware-parallelism evidence.
-  - Reviewer risk: "What happens if we add more cores?"
-  - Required fix: repeat the same strategy matrix on 4-core and 8-core setups.
+
+- Severity: MEDIUM-HIGH.
+- Current issue: contention-vs-concurrency claims are not yet paired with hardware-parallelism evidence.
+- Reviewer risk: "What happens if we add more cores?"
+- Required fix: repeat the same strategy matrix on 4-core and 8-core setups.
 
 4. Missing unified main figure
-  - Severity: VERY HIGH.
-  - Current issue: results are distributed across multiple tables without one memorable canonical figure.
-  - Required figure: Observability Cost vs Concurrency, with series for Disabled, GlobalMutex, Sharded, ThreadLocalBatched.
-  - Required plots: throughput and p99 (two panels or two aligned charts).
+
+- Severity: VERY HIGH.
+- Current issue: results are distributed across multiple tables without one memorable canonical figure.
+- Required figure: Observability Cost vs Concurrency, with series for Disabled, GlobalMutex, Sharded, ThreadLocalBatched.
+- Required plots: throughput and p99 (two panels or two aligned charts).
 
 5. Statistical strength
-  - Severity: LOW.
-  - Current issue: n=3 is minimally acceptable.
-  - Current status: partially improved in some runs (n=5).
-  - Required fix: prefer n=5 for the final matrix where feasible.
+
+- Severity: LOW.
+- Current issue: n=3 is minimally acceptable.
+- Current status: partially improved in some runs (n=5).
+- Required fix: prefer n=5 for the final matrix where feasible.
 
 If baseline + clean full comparison + core scaling remain missing, the likely outcome is weak reject/workshop-level acceptance rather than strong acceptance.
 
@@ -392,42 +397,47 @@ If baseline + clean full comparison + core scaling remain missing, the likely ou
 Do only this final experiment set:
 
 1. Core setups
-  - 4-core
-  - 8-core
+
+- 4-core
+- 8-core
 
 2. Strategies per core setup
-  - disabled
-  - global_mutex
-  - sharded
-  - thread_local
+
+- disabled
+- global_mutex
+- sharded
+- thread_local
 
 3. Client levels
-  - 100
-  - 500
-  - 1000
+
+- 100
+- 500
+- 1000
 
 4. Required outputs
-  - throughput mean +- stddev
-  - p99 mean +- stddev
-  - throughput CV = stddev / mean
-  - p99 CV = stddev / mean
+
+- throughput mean +- stddev
+- p99 mean +- stddev
+- throughput CV = stddev / mean
+- p99 CV = stddev / mean
 
 5. Required artifacts
-  - one table
-  - one graph
+
+- one table
+- one graph
 
 Canonical table format (repeat for all client levels):
 
-| Core Setup | Strategy | Clients | Throughput (mean +- stddev) | p99 (mean +- stddev) | Throughput CV | p99 CV |
-|:----------:|:--------:|:-------:|:---------------------------:|:--------------------:|:-------------:|:------:|
-| 4-core | Disabled | 100 | TODO | TODO | TODO | TODO |
-| 4-core | GlobalMutex | 100 | TODO | TODO | TODO | TODO |
-| 4-core | Sharded | 100 | TODO | TODO | TODO | TODO |
-| 4-core | ThreadLocal | 100 | TODO | TODO | TODO | TODO |
-| 8-core | Disabled | 100 | TODO | TODO | TODO | TODO |
-| 8-core | GlobalMutex | 100 | TODO | TODO | TODO | TODO |
-| 8-core | Sharded | 100 | TODO | TODO | TODO | TODO |
-| 8-core | ThreadLocal | 100 | TODO | TODO | TODO | TODO |
+| Core Setup |  Strategy   | Clients | Throughput (mean +- stddev) | p99 (mean +- stddev) | Throughput CV | p99 CV |
+| :--------: | :---------: | :-----: | :-------------------------: | :------------------: | :-----------: | :----: |
+|   4-core   |  Disabled   |   100   |            TODO             |         TODO         |     TODO      |  TODO  |
+|   4-core   | GlobalMutex |   100   |            TODO             |         TODO         |     TODO      |  TODO  |
+|   4-core   |   Sharded   |   100   |            TODO             |         TODO         |     TODO      |  TODO  |
+|   4-core   | ThreadLocal |   100   |            TODO             |         TODO         |     TODO      |  TODO  |
+|   8-core   |  Disabled   |   100   |            TODO             |         TODO         |     TODO      |  TODO  |
+|   8-core   | GlobalMutex |   100   |            TODO             |         TODO         |     TODO      |  TODO  |
+|   8-core   |   Sharded   |   100   |            TODO             |         TODO         |     TODO      |  TODO  |
+|   8-core   | ThreadLocal |   100   |            TODO             |         TODO         |     TODO      |  TODO  |
 
 Canonical figure definition:
 
