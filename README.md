@@ -353,60 +353,88 @@ Notes:
 
 ### Data Gaps And Required Additions
 
-The current README now includes fresh results from recent commits, but the following reviewer-critical gaps remain and must be closed before final claims are treated as strong:
+The current README includes fresh measurements, but the following gaps are still critical for a strong submission-ready paper.
 
-1. Weak Sharded coverage in the clean mandatory matrix:
-  - Present: Sharded in dataset A.
-  - Missing: Sharded in dataset B (mandatory matrix currently compares GlobalMutex vs ThreadLocalBatched only).
-  - Risk: The GlobalMutex -> Sharded -> ThreadLocalBatched evolution claim is not fully supported by one clean side-by-side matrix.
+1. Missing Disabled baseline
+  - Severity: VERY HIGH.
+  - Current issue: comparisons show "bad vs better" strategies, but not the true cost of observability itself.
+  - Reviewer risk: "How do we know telemetry is the bottleneck at all?"
+  - Required fix: include disabled vs global_mutex vs sharded vs thread_local in the same matrix.
 
-2. Missing core-count scaling evidence:
-  - Planned but not present in README: dedicated 4-core vs 8-core results for the same telemetry-overhead matrix.
-  - Risk: Claims about contention growth with concurrency are incomplete without hardware parallelism sensitivity.
+2. Missing Sharded in the clean mandatory matrix
+  - Severity: HIGH.
+  - Current issue: clean matrix has GlobalMutex vs ThreadLocalBatched, while Sharded appears only in separate/noisier results.
+  - Reviewer risk: the evolutionary claim (Global -> Sharded -> ThreadLocal) is not directly demonstrated in one clean comparison.
+  - Required fix: run Sharded in the mandatory matrix and report side-by-side with the other strategies.
 
-3. Missing measured Disabled baseline in the mandatory matrix:
-  - README references Disabled baseline conceptually, but the mandatory matrix data block does not show measured Disabled rows.
-  - Risk: Reviewers can question whether all strategies are slow relative to a true no-telemetry baseline.
+3. Missing core scaling (4-core vs 8-core)
+  - Severity: MEDIUM-HIGH.
+  - Current issue: contention-vs-concurrency claims are not yet paired with hardware-parallelism evidence.
+  - Reviewer risk: "What happens if we add more cores?"
+  - Required fix: repeat the same strategy matrix on 4-core and 8-core setups.
 
-4. Statistical strength is borderline for the mandatory matrix:
-  - Current mandatory matrix uses n=3 runs per configuration.
-  - This is acceptable as a minimum, but stronger evidence should use larger n and report stability explicitly.
+4. Missing unified main figure
+  - Severity: VERY HIGH.
+  - Current issue: results are distributed across multiple tables without one memorable canonical figure.
+  - Required figure: Observability Cost vs Concurrency, with series for Disabled, GlobalMutex, Sharded, ThreadLocalBatched.
+  - Required plots: throughput and p99 (two panels or two aligned charts).
 
-5. Missing primary figure:
-  - Required figure: Observability Cost vs Concurrency.
-  - X-axis: clients (100, 500, 1000).
-  - Series: Disabled, GlobalMutex, Sharded, ThreadLocalBatched.
-  - Y-axis: throughput and p99 (two panels or two figures).
+5. Statistical strength
+  - Severity: LOW.
+  - Current issue: n=3 is minimally acceptable.
+  - Current status: partially improved in some runs (n=5).
+  - Required fix: prefer n=5 for the final matrix where feasible.
+
+If baseline + clean full comparison + core scaling remain missing, the likely outcome is weak reject/workshop-level acceptance rather than strong acceptance.
 
 ### Minimum Work To Make This Strong
 
-Execute only the following additions:
+Do only this final experiment set:
 
-1. Add Disabled strategy to the same matrix:
-  - Strategies: disabled, global_mutex, sharded, thread_local.
-  - Clients: 100, 500, 1000.
+1. Core setups
+  - 4-core
+  - 8-core
 
-2. Add core scaling runs:
-  - Repeat the same strategy/client matrix on 4-core and 8-core setups.
+2. Strategies per core setup
+  - disabled
+  - global_mutex
+  - sharded
+  - thread_local
 
-3. Add one stability metric:
-  - Throughput CV = throughput_stddev / throughput_mean.
-  - p99 CV = p99_stddev / p99_mean.
+3. Client levels
+  - 100
+  - 500
+  - 1000
 
-4. Publish one clean table format:
+4. Required outputs
+  - throughput mean +- stddev
+  - p99 mean +- stddev
+  - throughput CV = stddev / mean
+  - p99 CV = stddev / mean
 
-| Core Setup | Strategy | Clients | Throughput Mean +- Stddev | p99 Mean +- Stddev | Throughput CV | p99 CV |
-|:----------:|:--------:|:-------:|:-------------------------:|:------------------:|:-------------:|:------:|
+5. Required artifacts
+  - one table
+  - one graph
+
+Canonical table format (repeat for all client levels):
+
+| Core Setup | Strategy | Clients | Throughput (mean +- stddev) | p99 (mean +- stddev) | Throughput CV | p99 CV |
+|:----------:|:--------:|:-------:|:---------------------------:|:--------------------:|:-------------:|:------:|
 | 4-core | Disabled | 100 | TODO | TODO | TODO | TODO |
 | 4-core | GlobalMutex | 100 | TODO | TODO | TODO | TODO |
 | 4-core | Sharded | 100 | TODO | TODO | TODO | TODO |
-| 4-core | ThreadLocalBatched | 100 | TODO | TODO | TODO | TODO |
+| 4-core | ThreadLocal | 100 | TODO | TODO | TODO | TODO |
 | 8-core | Disabled | 100 | TODO | TODO | TODO | TODO |
 | 8-core | GlobalMutex | 100 | TODO | TODO | TODO | TODO |
 | 8-core | Sharded | 100 | TODO | TODO | TODO | TODO |
-| 8-core | ThreadLocalBatched | 100 | TODO | TODO | TODO | TODO |
+| 8-core | ThreadLocal | 100 | TODO | TODO | TODO | TODO |
 
-When this table is completed for 100, 500, and 1000 clients, the observability-overhead claim will be substantially stronger.
+Canonical figure definition:
+
+- Title: Observability Cost vs Concurrency
+- X-axis: clients (100, 500, 1000)
+- Series: Disabled, Global, Sharded, ThreadLocal
+- Panels: Throughput and p99
 
 ---
 
