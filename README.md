@@ -21,7 +21,47 @@ Secondary questions:
 ## Architecture
 
 ```mermaid
-graph TB    subgraph Clients        C1["redis-cli"]        C2["Application"]        C3["Benchmark"]    end    subgraph Server        L["TCP Listener :6379"]        M["Metrics -- AtomicU64"]        CM["CommandMetrics -- per-cmd stats"]    end    subgraph Per-Connection Task        FP["RESP Parser"]        CE["Command Executor"]    end    subgraph Storage        DB1["Db -- Arc Mutex HashMap"]        DB2["DbDashMap -- Sharded"]    end    subgraph Persistence        AOF["AOF Writer"]        BG["Background Sync 1Hz"]    end    subgraph PubSub        PS["PubSub Manager"]        BC["Broadcast Channels"]    end    C1 & C2 & C3 --> L    L -->|spawn task| FP --> CE    CE --> DB1    CE -.->|alternative| DB2    CE --> AOF --> BG    CE --> PS --> BC    CE --> M    CE --> CM
+graph TB
+   subgraph Clients
+      C1["redis-cli"]
+      C2["Application"]
+      C3["Benchmark"]
+   end
+
+   subgraph Server
+      L["TCP Listener :6379"]
+      M["Metrics -- AtomicU64"]
+      CM["CommandMetrics -- per-cmd stats"]
+   end
+
+   subgraph Per-Connection Task
+      FP["RESP Parser"]
+      CE["Command Executor"]
+   end
+
+   subgraph Storage
+      DB1["Db -- Arc Mutex HashMap"]
+      DB2["DbDashMap -- Sharded"]
+   end
+
+   subgraph Persistence
+      AOF["AOF Writer"]
+      BG["Background Sync 1Hz"]
+   end
+
+   subgraph PubSub
+      PS["PubSub Manager"]
+      BC["Broadcast Channels"]
+   end
+
+   C1 & C2 & C3 --> L
+   L -->|spawn task| FP --> CE
+   CE --> DB1
+   CE -.->|alternative| DB2
+   CE --> AOF --> BG
+   CE --> PS --> BC
+   CE --> M
+   CE --> CM
 ```
 
 The system follows a task-per-connection model: each accepted TCP connection spawns an independent Tokio task that reads RESP frames, parses commands, executes them against the shared database, and writes responses. All database state is shared across tasks via either a global `Arc<Mutex<HashMap>>` or a sharded `DashMap`.
