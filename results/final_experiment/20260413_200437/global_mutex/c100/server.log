@@ -1,0 +1,8 @@
+[2m2026-04-13T14:34:52.748130Z[0m [32m INFO[0m ThreadId(01) Pub/Sub system initialized
+[2m2026-04-13T14:34:52.748190Z[0m [32m INFO[0m ThreadId(01) Metrics system initialized
+[2m2026-04-13T14:34:52.748199Z[0m [32m INFO[0m ThreadId(01) Command metrics initialized (strategy: global_mutex)
+[2m2026-04-13T14:34:52.748219Z[0m [32m INFO[0m ThreadId(01) AOF persistence enabled with EverySecond sync policy
+[2m2026-04-13T14:34:53.383988Z[0m [32m INFO[0m ThreadId(01) Loaded 1553444 commands from AOF
+[2m2026-04-13T14:34:53.769624Z[0m [32m INFO[0m ThreadId(01) AOF replay completed
+[2m2026-04-13T14:34:53.769705Z[0m [32m INFO[0m ThreadId(01) RustRedis server listening on 127.0.0.1:6379
+[2m2026-04-13T14:34:53.769717Z[0m [32m INFO[0m ThreadId(01) Press CTRL+C to shutdown gracefully

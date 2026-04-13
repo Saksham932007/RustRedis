@@ -1,0 +1,9 @@
+[2m2026-04-13T14:38:53.317380Z[0m [32m INFO[0m ThreadId(01) Pub/Sub system initialized
+[2m2026-04-13T14:38:53.317457Z[0m [32m INFO[0m ThreadId(01) Metrics system initialized
+[2m2026-04-13T14:38:53.317475Z[0m [32m INFO[0m ThreadId(01) Command metrics initialized (strategy: global_mutex)
+[2m2026-04-13T14:38:53.317523Z[0m [32m INFO[0m ThreadId(01) AOF persistence enabled with EverySecond sync policy
+[2m2026-04-13T14:38:54.682783Z[0m [32m INFO[0m ThreadId(01) Loaded 1718966 commands from AOF
+[2m2026-04-13T14:38:55.546187Z[0m [32m INFO[0m ThreadId(01) AOF replay completed
+[2m2026-04-13T14:38:55.546255Z[0m [32m INFO[0m ThreadId(01) RustRedis server listening on 127.0.0.1:6379
+[2m2026-04-13T14:38:55.546263Z[0m [32m INFO[0m ThreadId(01) Press CTRL+C to shutdown gracefully
+[2m2026-04-13T14:39:08.772942Z[0m [32m INFO[0m ThreadId(01) Accepted connection from: 127.0.0.1:56582
