@@ -375,7 +375,7 @@ def build_report(run_root: Path, output_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate final experiment report markdown")
     parser.add_argument("--input", required=True, help="Input run directory (results/final_experiment/<timestamp>)")
-    parser.add_argument("--output", default="final_experiment_report.md", help="Output markdown path")
+    parser.add_argument("--output", default="reports/final_experiment_report.md", help="Output markdown path")
     args = parser.parse_args()
 
     run_root = Path(args.input)

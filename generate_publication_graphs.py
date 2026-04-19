@@ -23,8 +23,8 @@ plt.rcParams.update(
 )
 
 DEFAULT_INPUT_CANDIDATES = [
-    Path("final_experiment_report_enhanced.md"),
-    Path("final_experiment_report.md"),
+    Path("reports/final_experiment_report_enhanced.md"),
+    Path("reports/final_experiment_report.md"),
     Path("results/benchmark_results.json"),
     Path("benchmarks/results/benchmark_results.json"),
 ]
@@ -382,7 +382,7 @@ def make_throughput_plot(grouped: Dict[str, List[dict]], strategies: List[str], 
     ax.legend(loc="upper right", fontsize=LEGEND_SIZE, frameon=False)
 
     fig.tight_layout()
-    output_path = output_dir / "throughput_vs_concurrency_final_v3.png"
+    output_path = output_dir / "throughput_vs_concurrency.png"
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return output_path
@@ -411,7 +411,7 @@ def make_latency_plot(grouped: Dict[str, List[dict]], strategies: List[str], out
     ax.legend(loc="upper left", fontsize=LEGEND_SIZE, frameon=False)
 
     fig.tight_layout()
-    output_path = output_dir / "latency_vs_concurrency_final_v3.png"
+    output_path = output_dir / "latency_vs_concurrency.png"
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return output_path
@@ -442,7 +442,7 @@ def make_cv_plot(grouped: Dict[str, List[dict]], strategies: List[str], output_d
     ax.legend(loc="lower right", fontsize=LEGEND_SIZE, frameon=False)
 
     fig.tight_layout()
-    output_path = output_dir / "cv_vs_concurrency_final_v3.png"
+    output_path = output_dir / "cv_vs_concurrency.png"
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return output_path
@@ -480,7 +480,7 @@ def make_throughput_boxplot(grouped: Dict[str, List[dict]], strategies: List[str
     ax.tick_params(axis="x", labelsize=TICK_LABEL_SIZE)
 
     fig.tight_layout()
-    output_path = output_dir / "throughput_distribution_final_v3.png"
+    output_path = output_dir / "throughput_distribution.png"
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return output_path
@@ -497,7 +497,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("figures/final_v3"),
+        default=Path("figures/canonical"),
         help="Directory where plot PNG files will be saved",
     )
     parser.add_argument(
