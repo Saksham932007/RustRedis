@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
 // ============================================================================
@@ -70,6 +70,10 @@ struct BenchmarkResult {
     name: String,
     /// Number of concurrent clients
     concurrency: usize,
+    /// Number of warmup requests ignored per client
+    warmup_ops_per_client: u64,
+    /// Number of measured requests per client
+    measured_ops_per_client: u64,
     /// Total operations completed
     total_ops: u64,
     /// Duration in seconds
@@ -82,6 +86,8 @@ struct BenchmarkResult {
     p99_us: f64,
     max_us: f64,
     avg_us: f64,
+    latency_stddev_us: f64,
+    latency_cv: f64,
     /// Errors encountered
     errors: u64,
     /// Target description
@@ -320,12 +326,14 @@ fn run_single_workload(
     let value: String = "x".repeat(value_size);
     let total_ops = Arc::new(AtomicU64::new(0));
     let total_errors = Arc::new(AtomicU64::new(0));
+    let warmup_barrier = Arc::new(Barrier::new(concurrency + 1));
+    let warmup_ops_per_client = requests_per_client / 10;
+    let measured_ops_per_client = requests_per_client.saturating_sub(warmup_ops_per_client);
+
     let all_latencies: Arc<std::sync::Mutex<Vec<u64>>> =
         Arc::new(std::sync::Mutex::new(Vec::with_capacity(
-            (concurrency as u64 * requests_per_client) as usize,
+            (concurrency as u64 * measured_ops_per_client) as usize,
         )));
-
-    let start = Instant::now();
 
     // Use OS threads for blocking I/O (TcpStream is synchronous)
     let mut handles = Vec::new();
@@ -335,19 +343,36 @@ fn run_single_workload(
         let total_ops = Arc::clone(&total_ops);
         let total_errors = Arc::clone(&total_errors);
         let all_latencies = Arc::clone(&all_latencies);
+        let warmup_barrier = Arc::clone(&warmup_barrier);
 
         handles.push(std::thread::spawn(move || {
             let mut client = match RespClient::connect(&host, port) {
                 Ok(c) => c,
                 Err(_) => {
-                    total_errors.fetch_add(requests_per_client, Ordering::Relaxed);
+                    warmup_barrier.wait();
+                    total_errors.fetch_add(measured_ops_per_client, Ordering::Relaxed);
                     return;
                 }
             };
-            let mut rng = rand::thread_rng();
-            let mut local_latencies = Vec::with_capacity(requests_per_client as usize);
 
-            for _ in 0..requests_per_client {
+            let mut rng = rand::thread_rng();
+            let mut local_latencies = Vec::with_capacity(measured_ops_per_client as usize);
+
+            // Warmup phase: execute but do not include in metrics.
+            for _ in 0..warmup_ops_per_client {
+                let key = format!("bench:key:{}", rng.gen_range(0..key_space));
+                let is_read = rng.gen::<f64>() < workload.read_ratio();
+
+                let _ = if is_read {
+                    client.get(&key)
+                } else {
+                    client.set(&key, &value)
+                };
+            }
+
+            warmup_barrier.wait();
+
+            for _ in 0..measured_ops_per_client {
                 let key = format!("bench:key:{}", rng.gen_range(0..key_space));
                 let is_read = rng.gen::<f64>() < workload.read_ratio();
 
@@ -377,11 +402,15 @@ fn run_single_workload(
         }));
     }
 
+    // Start measured wall-clock timer once all clients complete warmup.
+    warmup_barrier.wait();
+    let measured_start = Instant::now();
+
     for handle in handles {
         handle.join().unwrap();
     }
 
-    let duration = start.elapsed();
+    let duration = measured_start.elapsed();
     let ops = total_ops.load(Ordering::Relaxed);
     let errors = total_errors.load(Ordering::Relaxed);
 
@@ -392,17 +421,35 @@ fn run_single_workload(
             .unwrap(),
     };
 
+    let latency_stddev_us = stddev_u64(&tracker.samples);
+    let avg_us = tracker.avg();
+    let latency_cv = if avg_us > 0.0 {
+        latency_stddev_us / avg_us
+    } else {
+        0.0
+    };
+    let duration_secs = duration.as_secs_f64();
+    let ops_per_sec = if duration_secs > 0.0 {
+        ops as f64 / duration_secs
+    } else {
+        0.0
+    };
+
     BenchmarkResult {
         name: format!("{}", workload.display_name()),
         concurrency,
+        warmup_ops_per_client,
+        measured_ops_per_client,
         total_ops: ops,
-        duration_secs: duration.as_secs_f64(),
-        ops_per_sec: ops as f64 / duration.as_secs_f64(),
+        duration_secs,
+        ops_per_sec,
         p50_us: tracker.percentile(50.0),
         p95_us: tracker.percentile(95.0),
         p99_us: tracker.percentile(99.0),
         max_us: tracker.max(),
-        avg_us: tracker.avg(),
+        avg_us,
+        latency_stddev_us,
+        latency_cv,
         errors,
         target: target_name.to_string(),
     }
@@ -417,6 +464,23 @@ fn stddev(values: &[f64]) -> f64 {
     if values.len() < 2 { return 0.0; }
     let m = mean(values);
     let variance = values.iter().map(|v| (v - m).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
+    variance.sqrt()
+}
+
+fn stddev_u64(values: &[u64]) -> f64 {
+    if values.len() < 2 {
+        return 0.0;
+    }
+    let n = values.len() as f64;
+    let m = values.iter().map(|v| *v as f64).sum::<f64>() / n;
+    let variance = values
+        .iter()
+        .map(|v| {
+            let dv = *v as f64 - m;
+            dv * dv
+        })
+        .sum::<f64>()
+        / (n - 1.0);
     variance.sqrt()
 }
 
@@ -538,7 +602,7 @@ async fn main() {
                     &args.host,
                     args.port,
                     conc,
-                    args.requests / conc as u64,
+                    args.requests,
                     args.key_space,
                     args.value_size,
                     *workload,
@@ -619,7 +683,7 @@ async fn main() {
                         &args.host,
                         args.redis_port,
                         conc,
-                        args.requests / conc as u64,
+                        args.requests,
                         args.key_space,
                         args.value_size,
                         *workload,
@@ -676,7 +740,7 @@ async fn main() {
                 &args.host,
                 args.port,
                 test_concurrency,
-                test_requests / test_concurrency as u64,
+                test_requests,
                 args.key_space,
                 args.value_size,
                 WorkloadType::Mixed,

@@ -1,0 +1,6 @@
+# CommandStats (strategy: hdr_histogram)
+cmdstat_flushdb:calls=30,total_time_us=42847,avg_time_us=1428.23,min_time_us=15,max_time_us=4832
+cmdstat_get:calls=9001518,total_time_us=714646607,avg_time_us=79.39,min_time_us=0,max_time_us=376080
+cmdstat_ping:calls=31,total_time_us=1252,avg_time_us=40.39,min_time_us=5,max_time_us=456
+cmdstat_set:calls=8994464,total_time_us=711878896,avg_time_us=79.15,min_time_us=1,max_time_us=337926
+
