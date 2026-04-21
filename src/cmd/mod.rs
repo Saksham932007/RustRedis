@@ -807,6 +807,37 @@ impl Command {
         }
     }
 
+    /// Return a best-effort logical key for key-space metrics strategies.
+    pub fn metrics_key_hint(&self) -> Option<&str> {
+        match self {
+            Command::Set { key, .. }
+            | Command::Get { key }
+            | Command::Exists { key }
+            | Command::Type { key }
+            | Command::LPush { key, .. }
+            | Command::RPush { key, .. }
+            | Command::LPop { key }
+            | Command::RPop { key }
+            | Command::LRange { key, .. }
+            | Command::LLen { key }
+            | Command::SAdd { key, .. }
+            | Command::SRem { key, .. }
+            | Command::SMembers { key }
+            | Command::SIsMember { key, .. }
+            | Command::SCard { key }
+            | Command::HSet { key, .. }
+            | Command::HGet { key, .. }
+            | Command::HGetAll { key }
+            | Command::HDel { key, .. }
+            | Command::HExists { key, .. }
+            | Command::HLen { key } => Some(key.as_str()),
+            Command::Del { keys } => keys.first().map(|key| key.as_str()),
+            Command::Keys { pattern } => Some(pattern.as_str()),
+            Command::Publish { channel, .. } => Some(channel.as_str()),
+            _ => None,
+        }
+    }
+
     /// Execute the command and write the response to the connection
     pub async fn execute(
         &self,

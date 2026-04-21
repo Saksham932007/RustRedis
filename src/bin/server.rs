@@ -34,50 +34,72 @@ async fn main() -> Result<()> {
     let metrics = Metrics::new();
     info!("Metrics system initialized");
 
+    let disable_aof = std::env::var("RUSTREDIS_DISABLE_AOF")
+        .map(|v| {
+            let normalized = v.to_ascii_lowercase();
+            normalized == "1" || normalized == "true" || normalized == "yes"
+        })
+        .unwrap_or(false);
+    let aof_path = std::env::var("RUSTREDIS_AOF_PATH").unwrap_or_else(|_| "appendonly.aof".to_string());
+
     // Create per-command metrics collector
     let strategy = std::env::var("RUSTREDIS_METRICS_STRATEGY")
         .map(|s| MetricsStrategy::from_str_loose(&s))
-        .unwrap_or(MetricsStrategy::Sharded);
+        .unwrap_or(MetricsStrategy::Sharded2Key);
     let command_metrics = CommandMetricsCollector::new(strategy);
     info!("Command metrics initialized (strategy: {})", strategy.name());
 
     // Start background flush task for ThreadLocalBatched strategy
     if let Some(tl_collector) = command_metrics.thread_local_collector() {
-        command_metrics::start_flush_task(tl_collector);
+        command_metrics::start_thread_local_flush_task(tl_collector);
         info!("Thread-local metrics flush task started (100ms interval)");
     }
 
-    // Initialize AOF persistence
-    let aof = match Aof::new("appendonly.aof", AofSyncPolicy::EverySecond) {
-        Ok(aof) => {
-            info!("AOF persistence enabled with EverySecond sync policy");
-            let aof = Arc::new(aof);
+    // Start background flush task for HdrHistogram strategy
+    if let Some(hdr_collector) = command_metrics.hdr_histogram_collector() {
+        command_metrics::start_hdr_flush_task(hdr_collector);
+        info!("HdrHistogram metrics flush task started (100ms interval)");
+    }
 
-            // Start background sync task
-            Arc::clone(&aof).start_background_sync();
+    // Initialize AOF persistence unless explicitly disabled for experiment runs.
+    let aof = if disable_aof {
+        warn!("AOF persistence disabled via RUSTREDIS_DISABLE_AOF");
+        None
+    } else {
+        match Aof::new(&aof_path, AofSyncPolicy::EverySecond) {
+            Ok(aof) => {
+                info!(
+                    "AOF persistence enabled with EverySecond sync policy (path: {})",
+                    aof_path
+                );
+                let aof = Arc::new(aof);
 
-            // Try to load existing AOF file
-            match Aof::load("appendonly.aof") {
-                Ok(frames) => {
-                    info!("Loaded {} commands from AOF", frames.len());
-                    // Replay commands to restore state
-                    for frame in frames {
-                        if let Ok(cmd) = Command::from_frame(frame) {
-                            let _ = cmd.replay(&db);
+                // Start background sync task
+                Arc::clone(&aof).start_background_sync();
+
+                // Try to load existing AOF file
+                match Aof::load(&aof_path) {
+                    Ok(frames) => {
+                        info!("Loaded {} commands from AOF", frames.len());
+                        // Replay commands to restore state
+                        for frame in frames {
+                            if let Ok(cmd) = Command::from_frame(frame) {
+                                let _ = cmd.replay(&db);
+                            }
                         }
+                        info!("AOF replay completed");
                     }
-                    info!("AOF replay completed");
+                    Err(e) => {
+                        warn!("Could not load AOF (this is normal on first run): {}", e);
+                    }
                 }
-                Err(e) => {
-                    warn!("Could not load AOF (this is normal on first run): {}", e);
-                }
-            }
 
-            Some(aof)
-        }
-        Err(e) => {
-            warn!("AOF persistence disabled: {}", e);
-            None
+                Some(aof)
+            }
+            Err(e) => {
+                warn!("AOF persistence disabled: {}", e);
+                None
+            }
         }
     };
 
@@ -179,6 +201,7 @@ async fn handle_connection(
 
         // Execute the command (with timing)
         let cmd_name = command.name();
+        let metrics_key_hint = command.metrics_key_hint();
         let cmd_start = Instant::now();
         command
             .execute(&db, &mut connection, &pubsub, &metrics, &command_metrics)
@@ -188,6 +211,6 @@ async fn handle_connection(
         metrics.increment_commands();
 
         // Record per-command metrics
-        command_metrics.record(cmd_name, duration_us);
+        command_metrics.record(cmd_name, metrics_key_hint, duration_us);
     }
 }

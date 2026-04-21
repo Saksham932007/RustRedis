@@ -1,0 +1,11 @@
+{
+  "decision": "no_formal_outlier",
+  "details": "Rerun anomaly did not repeat and original run does not violate |value| > 3x median rule.",
+  "excluded_runs": [],
+  "main_run1": 211579.76853697098,
+  "main_median": 217617.81006234285,
+  "main_threshold_3x_median": 652853.4301870286,
+  "rerun_run1": 48785.35884712011,
+  "rerun_median": 60702.20665682479,
+  "rerun_threshold_3x_median": 182106.61997047436
+}

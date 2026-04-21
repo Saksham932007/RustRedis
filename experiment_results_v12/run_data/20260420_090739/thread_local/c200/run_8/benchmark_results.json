@@ -1,0 +1,55 @@
+{
+  "timestamp": "1776680887",
+  "runs_per_config": 1,
+  "results": [
+    {
+      "name": "Mixed (50% GET / 50% SET)",
+      "concurrency": 200,
+      "target": "RustRedis",
+      "runs": 1,
+      "ops_per_sec_mean": 77136.93961559322,
+      "ops_per_sec_stddev": 0.0,
+      "p50_us_mean": 1728.0,
+      "p50_us_stddev": 0.0,
+      "p99_us_mean": 15568.0,
+      "p99_us_stddev": 0.0,
+      "max_us_mean": 254932.0,
+      "max_us_stddev": 0.0,
+      "total_errors": 0,
+      "per_run": [
+        {
+          "name": "Mixed (50% GET / 50% SET)",
+          "concurrency": 200,
+          "warmup_ops_per_client": 100,
+          "measured_ops_per_client": 900,
+          "total_ops": 180000,
+          "duration_secs": 2.333512334,
+          "ops_per_sec": 77136.93961559322,
+          "p50_us": 1728.0,
+          "p95_us": 6925.0,
+          "p99_us": 15568.0,
+          "max_us": 254932.0,
+          "avg_us": 2574.2593055555553,
+          "latency_stddev_us": 3955.2154377361094,
+          "latency_cv": 1.5364479519216607,
+          "errors": 0,
+          "target": "RustRedis"
+        }
+      ]
+    }
+  ],
+  "memory_samples": [
+    {
+      "elapsed_secs": 0.002413125,
+      "rss_bytes": 0,
+      "vsize_bytes": 0,
+      "label": "idle"
+    },
+    {
+      "elapsed_secs": 2.647647334,
+      "rss_bytes": 0,
+      "vsize_bytes": 0,
+      "label": "mixed_c200"
+    }
+  ]
+}

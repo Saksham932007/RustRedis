@@ -1,0 +1,6 @@
+# CommandStats (strategy: sharded_2key)
+cmdstat_flushdb:calls=30,total_time_us=36505,avg_time_us=1216.83,min_time_us=24,max_time_us=1747
+cmdstat_get:calls=7503075,total_time_us=142794316,avg_time_us=19.03,min_time_us=0,max_time_us=125741
+cmdstat_ping:calls=31,total_time_us=521,avg_time_us=16.81,min_time_us=8,max_time_us=38
+cmdstat_set:calls=7496925,total_time_us=152067455,avg_time_us=20.28,min_time_us=1,max_time_us=64740
+
