@@ -6,7 +6,7 @@
 use dashmap::DashMap;
 use hdrhistogram::Histogram;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -15,6 +15,12 @@ const HDR_LOWEST_TRACKABLE_US: u64 = 1;
 const HDR_HIGHEST_TRACKABLE_US: u64 = 3_600_000_000;
 const HDR_SIGNIFICANT_FIGURES: u8 = 3;
 const CMDSTAT_MAX_LINES: usize = 500;
+const METRICS_SHARD_COUNT: usize = 64;
+
+fn dashmap_shard_index_for_hash(hash: usize, shard_count: usize) -> usize {
+    let shift = (std::mem::size_of::<usize>() * 8) - (shard_count.trailing_zeros() as usize);
+    (hash << 7) >> shift
+}
 
 // =============================================================================
 // Configuration
@@ -184,7 +190,7 @@ struct Sharded2KeyCollector {
 impl Sharded2KeyCollector {
     fn new() -> Self {
         Sharded2KeyCollector {
-            data: DashMap::new(),
+            data: DashMap::with_shard_amount(METRICS_SHARD_COUNT),
         }
     }
 
@@ -205,6 +211,20 @@ impl Sharded2KeyCollector {
             .map(|entry| (*entry.key(), entry.value().clone()))
             .collect()
     }
+
+    fn shard_for_command(&self, cmd_name: &'static str) -> usize {
+        let hash = self.data.hash_usize(&cmd_name);
+        dashmap_shard_index_for_hash(hash, METRICS_SHARD_COUNT)
+    }
+
+    fn shard_call_distribution(&self) -> Vec<u64> {
+        let mut per_shard_calls = vec![0u64; METRICS_SHARD_COUNT];
+        for entry in self.data.iter() {
+            let shard = self.shard_for_command(entry.key());
+            per_shard_calls[shard] = per_shard_calls[shard].saturating_add(entry.value().calls);
+        }
+        per_shard_calls
+    }
 }
 
 // =============================================================================
@@ -218,7 +238,7 @@ struct ShardedNCollector {
 impl ShardedNCollector {
     fn new() -> Self {
         ShardedNCollector {
-            data: DashMap::new(),
+            data: DashMap::with_shard_amount(METRICS_SHARD_COUNT),
         }
     }
 
@@ -239,6 +259,26 @@ impl ShardedNCollector {
             .map(|entry| (entry.key().clone(), entry.value().clone()))
             .collect()
     }
+
+    fn shard_for_metric_key(&self, metric_key: &str) -> usize {
+        let hash = self.data.hash_usize(&metric_key);
+        dashmap_shard_index_for_hash(hash, METRICS_SHARD_COUNT)
+    }
+
+    fn shard_distribution(&self) -> Vec<(u64, u64)> {
+        let mut per_shard_key_count = vec![0u64; METRICS_SHARD_COUNT];
+        let mut per_shard_calls = vec![0u64; METRICS_SHARD_COUNT];
+
+        for entry in self.data.iter() {
+            let shard = self.shard_for_metric_key(entry.key());
+            per_shard_key_count[shard] = per_shard_key_count[shard].saturating_add(1);
+            per_shard_calls[shard] = per_shard_calls[shard].saturating_add(entry.value().calls);
+        }
+
+        (0..METRICS_SHARD_COUNT)
+            .map(|idx| (per_shard_key_count[idx], per_shard_calls[idx]))
+            .collect()
+    }
 }
 
 // =============================================================================
@@ -254,6 +294,9 @@ pub struct ThreadLocalBatchedCollector {
     global_snapshot: Mutex<HashMap<&'static str, CommandStat>>,
     pending_batches: Mutex<Vec<HashMap<&'static str, CommandStat>>>,
     records_since_flush: AtomicU64,
+    count_trigger_hits: AtomicU64,
+    timer_trigger_hits: AtomicU64,
+    flush_with_batches: AtomicU64,
 }
 
 impl ThreadLocalBatchedCollector {
@@ -262,6 +305,9 @@ impl ThreadLocalBatchedCollector {
             global_snapshot: Mutex::new(HashMap::new()),
             pending_batches: Mutex::new(Vec::new()),
             records_since_flush: AtomicU64::new(0),
+            count_trigger_hits: AtomicU64::new(0),
+            timer_trigger_hits: AtomicU64::new(0),
+            flush_with_batches: AtomicU64::new(0),
         }
     }
 
@@ -275,6 +321,7 @@ impl ThreadLocalBatchedCollector {
 
         let count = self.records_since_flush.fetch_add(1, Ordering::Relaxed);
         if count % FLUSH_TRIGGER_EVERY_RECORDS == FLUSH_TRIGGER_EVERY_RECORDS - 1 {
+            self.count_trigger_hits.fetch_add(1, Ordering::Relaxed);
             self.push_local_batch();
         }
     }
@@ -301,6 +348,8 @@ impl ThreadLocalBatchedCollector {
             return;
         }
 
+        self.flush_with_batches.fetch_add(1, Ordering::Relaxed);
+
         let mut snapshot = self.global_snapshot.lock().unwrap();
         for batch in batches {
             for (cmd, stat) in batch {
@@ -321,6 +370,22 @@ impl ThreadLocalBatchedCollector {
 
         let snapshot = self.global_snapshot.lock().unwrap();
         snapshot.iter().map(|(k, v)| (*k, v.clone())).collect()
+    }
+
+    fn record_timer_trigger(&self) {
+        self.timer_trigger_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn count_trigger_hits(&self) -> u64 {
+        self.count_trigger_hits.load(Ordering::Relaxed)
+    }
+
+    fn timer_trigger_hits(&self) -> u64 {
+        self.timer_trigger_hits.load(Ordering::Relaxed)
+    }
+
+    fn flush_with_batches(&self) -> u64 {
+        self.flush_with_batches.load(Ordering::Relaxed)
     }
 }
 
@@ -400,6 +465,11 @@ pub struct HdrHistogramCollector {
     global_snapshot: Mutex<HashMap<String, HdrThreadStat>>,
     pending_batches: Mutex<Vec<HashMap<String, HdrThreadStat>>>,
     records_since_flush: AtomicU64,
+    count_trigger_hits: AtomicU64,
+    timer_trigger_hits: AtomicU64,
+    phase_swaps: AtomicU64,
+    cas_retries: AtomicU64,
+    flush_in_progress: AtomicBool,
 }
 
 impl HdrHistogramCollector {
@@ -408,6 +478,11 @@ impl HdrHistogramCollector {
             global_snapshot: Mutex::new(HashMap::new()),
             pending_batches: Mutex::new(Vec::new()),
             records_since_flush: AtomicU64::new(0),
+            count_trigger_hits: AtomicU64::new(0),
+            timer_trigger_hits: AtomicU64::new(0),
+            phase_swaps: AtomicU64::new(0),
+            cas_retries: AtomicU64::new(0),
+            flush_in_progress: AtomicBool::new(false),
         }
     }
 
@@ -421,6 +496,7 @@ impl HdrHistogramCollector {
 
         let count = self.records_since_flush.fetch_add(1, Ordering::Relaxed);
         if count % FLUSH_TRIGGER_EVERY_RECORDS == FLUSH_TRIGGER_EVERY_RECORDS - 1 {
+            self.count_trigger_hits.fetch_add(1, Ordering::Relaxed);
             self.push_local_batch();
         }
     }
@@ -438,14 +514,26 @@ impl HdrHistogramCollector {
     }
 
     fn flush(&self) {
+        if self
+            .flush_in_progress
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            self.cas_retries.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
         let batches: Vec<HashMap<String, HdrThreadStat>> = {
             let mut pending = self.pending_batches.lock().unwrap();
             std::mem::take(&mut *pending)
         };
 
         if batches.is_empty() {
+            self.flush_in_progress.store(false, Ordering::Release);
             return;
         }
+
+        self.phase_swaps.fetch_add(1, Ordering::Relaxed);
 
         let mut snapshot = self.global_snapshot.lock().unwrap();
         for batch in batches {
@@ -458,6 +546,7 @@ impl HdrHistogramCollector {
         }
 
         self.records_since_flush.store(0, Ordering::Relaxed);
+        self.flush_in_progress.store(false, Ordering::Release);
     }
 
     fn snapshot(&self) -> Vec<(String, CommandStat)> {
@@ -470,6 +559,26 @@ impl HdrHistogramCollector {
             .iter()
             .map(|(key, stat)| (key.clone(), stat.as_command_stat()))
             .collect()
+    }
+
+    fn record_timer_trigger(&self) {
+        self.timer_trigger_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn count_trigger_hits(&self) -> u64 {
+        self.count_trigger_hits.load(Ordering::Relaxed)
+    }
+
+    fn timer_trigger_hits(&self) -> u64 {
+        self.timer_trigger_hits.load(Ordering::Relaxed)
+    }
+
+    fn phase_swaps(&self) -> u64 {
+        self.phase_swaps.load(Ordering::Relaxed)
+    }
+
+    fn cas_retries(&self) -> u64 {
+        self.cas_retries.load(Ordering::Relaxed)
     }
 }
 
@@ -655,6 +764,69 @@ impl CommandMetricsCollector {
             ));
         }
 
+        if let Some(ref collector) = self.sharded_2key {
+            let get_shard = collector.shard_for_command("GET");
+            let set_shard = collector.shard_for_command("SET");
+            let per_shard_calls = collector.shard_call_distribution();
+
+            output.push_str("\r\n# Sharded2Key\r\n");
+            output.push_str(&format!("sharded_2key_shard_count:{}\r\n", METRICS_SHARD_COUNT));
+            output.push_str(&format!("sharded_2key_get_shard:{}\r\n", get_shard));
+            output.push_str(&format!("sharded_2key_set_shard:{}\r\n", set_shard));
+            for (idx, calls) in per_shard_calls.iter().enumerate() {
+                output.push_str(&format!("sharded_2key_shard_{}_calls:{}\r\n", idx, calls));
+            }
+        }
+
+        if let Some(ref collector) = self.sharded_n {
+            let dist = collector.shard_distribution();
+            let nonempty = dist.iter().filter(|(keys, _)| *keys > 0).count();
+
+            output.push_str("\r\n# ShardedN\r\n");
+            output.push_str(&format!("sharded_n_shard_count:{}\r\n", METRICS_SHARD_COUNT));
+            output.push_str(&format!("sharded_n_nonempty_shards:{}\r\n", nonempty));
+            for (idx, (keys, calls)) in dist.iter().enumerate() {
+                output.push_str(&format!("sharded_n_shard_{}_keys:{}\r\n", idx, keys));
+                output.push_str(&format!("sharded_n_shard_{}_calls:{}\r\n", idx, calls));
+            }
+        }
+
+        if let Some(ref collector) = self.thread_local {
+            output.push_str("\r\n# ThreadLocalFlush\r\n");
+            output.push_str(&format!(
+                "thread_local_count_trigger_hits:{}\r\n",
+                collector.count_trigger_hits()
+            ));
+            output.push_str(&format!(
+                "thread_local_timer_trigger_hits:{}\r\n",
+                collector.timer_trigger_hits()
+            ));
+            output.push_str(&format!(
+                "thread_local_flush_with_batches:{}\r\n",
+                collector.flush_with_batches()
+            ));
+        }
+
+        if let Some(ref collector) = self.hdr_histogram {
+            output.push_str("\r\n# HdrHistogram\r\n");
+            output.push_str(&format!(
+                "hdr_histogram_count_trigger_hits:{}\r\n",
+                collector.count_trigger_hits()
+            ));
+            output.push_str(&format!(
+                "hdr_histogram_timer_trigger_hits:{}\r\n",
+                collector.timer_trigger_hits()
+            ));
+            output.push_str(&format!(
+                "hdr_histogram_phase_swaps:{}\r\n",
+                collector.phase_swaps()
+            ));
+            output.push_str(&format!(
+                "hdr_histogram_cas_retries:{}\r\n",
+                collector.cas_retries()
+            ));
+        }
+
         output
     }
 }
@@ -677,6 +849,7 @@ pub fn start_thread_local_flush_task(collector: Arc<ThreadLocalBatchedCollector>
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
             interval.tick().await;
+            collector.record_timer_trigger();
             collector.flush();
         }
     });
@@ -687,6 +860,7 @@ pub fn start_hdr_flush_task(collector: Arc<HdrHistogramCollector>) {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
             interval.tick().await;
+            collector.record_timer_trigger();
             collector.flush();
         }
     });

@@ -1,0 +1,40 @@
+{
+  "matrix_source": {
+    "raw_data_csv": "experiment_results_v12/raw_data.csv",
+    "metadata_json": "experiment_results_v12/metadata.json",
+    "strategies": [
+      "Disabled",
+      "GlobalMutex",
+      "Sharded-2key",
+      "ThreadLocal",
+      "HdrHistogram",
+      "Sharded-N"
+    ],
+    "concurrency_levels": [
+      100,
+      200,
+      300,
+      400,
+      500,
+      600,
+      700,
+      1000
+    ],
+    "runs_per_configuration": 30,
+    "warmup_ops_per_client": 100,
+    "measured_ops_per_client": 900,
+    "workload": "50% GET / 50% SET",
+    "keyspace": 10000,
+    "value_size": 64
+  },
+  "system_validation_source": {
+    "run_dir": "experiment_results_v12/system_validation/20260421_170502",
+    "strategies": [
+      "sharded_n@500",
+      "sharded_2key@500",
+      "hdr_histogram@400",
+      "hdr_histogram@500",
+      "thread_local@500"
+    ]
+  }
+}
