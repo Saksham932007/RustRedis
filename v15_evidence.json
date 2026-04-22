@@ -1,0 +1,57 @@
+{
+  "causal_validation": {
+    "type": "CODE_CHANGE",
+    "files_changed": [
+      "src/command_metrics.rs",
+      "benchmarks/src/main.rs",
+      "src/bin/server.rs"
+    ],
+    "diff_summary": "Commits inspected: be472595525c361656ca88f3ed2d2861105083f0, 624cb56a4e3e9dc0f7fde6cc047085a330a28d21, 0c6384c1a22fec745d3e058bd2d37471a10c5b01, 1a605ed40b6870e6a16be0ed990b071b268985a2. src/command_metrics.rs changed from a single Sharded mode to Sharded2Key + ShardedN with key_hint routing, introduced String-keyed ShardedN (metric_key.to_string() in record path), and moved DashMap initialization from DashMap::new() to DashMap::with_shard_amount(64). benchmarks/src/main.rs changed workload measurement semantics by adding a 10% warmup phase and measuring requests_per_client directly (instead of earlier per-concurrency request splitting). Provenance check: metadata.json records commit be472595..., but that commit's source does not contain ShardedN/HdrHistogram or warmup logic, so the dataset was produced from code not represented by that clean commit hash. Repository validation: release builds for server and benchmark succeeded during fresh system-validation execution.",
+    "mechanism": "Performance shifts are attributable to code-level changes in workload parameterization and metrics collection internals. The benchmark workload changes (warmup exclusion plus fixed per-client request semantics) directly alter measured throughput/latency behavior, while metrics keying/sharding changes modify contention characteristics (especially ShardedN key-space distribution)."
+  },
+  "dashmap_validation": {
+    "shards": 64,
+    "hasher": "std::collections::hash_map::RandomState (DashMap 5.5.3 default)",
+    "key_type": "&'static str",
+    "allocation_on_hot_path": false,
+    "rwlock_per_shard": true
+  },
+  "shard_distribution": {
+    "sharded_2key": {
+      "active_shards": [
+        16,
+        25
+      ],
+      "calls": [
+        250422,
+        249578
+      ]
+    },
+    "sharded_n": {
+      "total_active_shards": 64,
+      "min_calls": 6578,
+      "max_calls": 9881
+    }
+  },
+  "figure_validation": {
+    "latency_non_negative": true,
+    "ci_consistency": true,
+    "naming_consistent": true,
+    "issues": []
+  },
+  "zenodo_package": {
+    "files": [
+      "experiment_results_v12/raw_data.csv",
+      "experiment_results_v12/aggregated_data.csv",
+      "experiment_results_v12/run_data/",
+      "experiment_results_v12/system_validation/",
+      "experiment_results_v12/metadata.json",
+      "experiment_results_v12/final_experiment_config.json",
+      "final_experiment_v12.json",
+      "benchmarks/run_final_experiment_v12.py",
+      "benchmarks/generate_final_experiment_v12_dataset.py",
+      "benchmarks/generate_final_experiment_report.py"
+    ],
+    "ready_for_upload": true
+  }
+}

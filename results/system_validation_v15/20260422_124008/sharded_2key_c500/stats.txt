@@ -1,0 +1,17 @@
+# Server
+uptime_seconds:3.64
+
+# Clients
+connected_clients:1
+
+# Stats
+total_commands_processed:500004
+instantaneous_ops_per_sec:137389.10
+avg_command_duration_us:25.71
+
+# Persistence
+total_aof_write_time_us:0
+
+# Contention
+total_lock_wait_time_us:0
+
