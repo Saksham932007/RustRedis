@@ -1,0 +1,11 @@
+# CommandStats (strategy: thread_local)
+cmdstat_flushdb:calls=1,total_time_us=3,avg_time_us=3.00,min_time_us=3,max_time_us=3
+cmdstat_get:calls=248316,total_time_us=5632147,avg_time_us=22.68,min_time_us=0,max_time_us=119400
+cmdstat_ping:calls=2,total_time_us=7,avg_time_us=3.50,min_time_us=3,max_time_us=4
+cmdstat_set:calls=247854,total_time_us=5704584,avg_time_us=23.02,min_time_us=1,max_time_us=105868
+
+# ThreadLocalFlush
+thread_local_count_trigger_hits:487
+thread_local_timer_trigger_hits:27
+thread_local_flush_with_batches:28
+
