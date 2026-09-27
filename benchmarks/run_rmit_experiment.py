@@ -96,8 +96,16 @@ def run_text(cmd: Sequence[str], cwd: Path, check: bool = True) -> subprocess.Co
 
 
 def redis_ping(root_dir: Path, port: int) -> bool:
-    r = run_text(["redis-cli", "-p", str(port), "PING"], cwd=root_dir, check=False)
-    return r.returncode == 0 and "PONG" in (r.stdout or "")
+    """Pure-Python RESP PING — avoids depending on redis-cli being installed."""
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1.0) as sock:
+            sock.sendall(b"*1\r\n$4\r\nPING\r\n")
+            data = sock.recv(4096)
+            return b"PONG" in data
+    except OSError:
+        return False
 
 
 def wait_for_server(root_dir: Path, port: int, proc: subprocess.Popen, timeout_secs: int) -> None:
