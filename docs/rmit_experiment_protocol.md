@@ -150,3 +150,60 @@ and the v12 matrix in `experiment_results_v12/` as the machine target for
 all runs produced from this protocol onward. Older results remain valid
 for their own hardware but are not directly comparable to RMIT-protocol
 runs on this laptop.
+
+## Alternative: running on a cloud VM
+
+Step 2's manual checklist exists to work around a constraint of running
+*on the machine you're also using* — an agent session or your own
+foreground work shares CPU/RAM with the benchmark no matter how many
+other apps you close. A disposable cloud VM sidesteps this by construction:
+nothing else runs on it, so there's no checklist to satisfy.
+
+`experiment_results_rmit_azure/` was produced this way, on a dedicated
+Azure `Standard_D4s_v6` VM (4 vCPU / 16GB RAM, Central India), torn down
+immediately after the run. Rough steps, if repeating this:
+
+```bash
+# from wherever you're driving the VM from (needs az CLI + az login)
+az group create --name <rg-name> --location centralindia
+az vm create --resource-group <rg-name> --name rmit-bench-vm \
+  --image Ubuntu2404 --size Standard_D4s_v6 \
+  --admin-username <user> --ssh-key-values ~/.ssh/<key>.pub \
+  --os-disk-size-gb 30 --storage-sku StandardSSD_LRS \
+  --public-ip-sku Standard --nsg-rule SSH
+
+# on the VM (via ssh)
+sudo apt-get update -qq && sudo apt-get install -y gcc git curl build-essential
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+source $HOME/.cargo/env
+git clone --branch research/rmit-redesign --single-branch \
+  https://github.com/Saksham932007/RustRedis.git ~/RustRedis
+cd ~/RustRedis
+cargo build --release --bin server
+cargo build --release --manifest-path benchmarks/Cargo.toml
+RMIT_ENVIRONMENT_LABEL=azure-vm-Standard_D4s_v6-centralindia \
+  python3 benchmarks/run_rmit_experiment.py --output-dir experiment_results_rmit_azure \
+  --runs 30 --concurrency 100,200,300,400,500,600,700,1000 --skip-build
+
+# pull results back, then IMMEDIATELY tear down:
+az group delete --name <rg-name> --yes --no-wait
+```
+
+Set `RMIT_ENVIRONMENT_LABEL` before running so `metadata_rmit.json`'s
+`machine_specs.environment` field records which environment produced the
+data (the script itself detects real CPU/memory from `/proc`, but has no
+way to know "this is a cloud VM" vs "this is the laptop" without a hint).
+
+Notes:
+- A brand-new Azure subscription may reject every VM size with
+  `SkuNotAvailable: Capacity Restrictions` regardless of quota shown —
+  this is a new-account deployment hold, not a real capacity or quota
+  problem. Submitting a quota-increase request (Help + Support → Service
+  and subscription limits (quotas) → Compute-VM) against whatever series
+  the portal offers for your region, even for a small amount, is what
+  clears it (usually within minutes).
+- The repo is public, so the VM can `git clone` it directly with no
+  credentials.
+- **Always delete the resource group as soon as you've pulled the
+  results.** A D4s_v6 in Central India costs about $0.21/hour — trivial
+  for a ~2 hour run, but there's no reason to let it idle afterward.

@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import platform
 import random
 import shutil
@@ -147,8 +148,6 @@ def start_server(
     timeout_secs: int,
     log_path: Path,
 ) -> Tuple[subprocess.Popen, object]:
-    import os
-
     env = os.environ.copy()
     env["TOKIO_WORKER_THREADS"] = str(worker_threads)
     env["RUSTREDIS_METRICS_STRATEGY"] = strategy.env_value
@@ -225,13 +224,40 @@ def collect_machine_specs(root_dir: Path) -> Dict[str, object]:
         r = run_text(cmd, cwd=root_dir, check=False)
         return (r.stdout or "").strip()
 
+    def read_int(path: str) -> Optional[int]:
+        try:
+            return int(Path(path).read_text().strip())
+        except (OSError, ValueError):
+            return None
+
+    processor = ""
+    try:
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            if line.startswith("model name"):
+                processor = line.split(":", 1)[1].strip()
+                break
+    except OSError:
+        pass
+
+    mem_total_kb = None
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemTotal:"):
+                mem_total_kb = int(line.split()[1])
+                break
+    except OSError:
+        pass
+
     return {
-        "hostname_anonymized": "linux-i3-8gb-laptop",  # do not leak real hostname into public artifacts
+        # Real hostname is intentionally never recorded here (would leak into
+        # committed public artifacts); this identifies *which environment*
+        # ran the benchmark without naming the machine.
+        "environment": os.environ.get("RMIT_ENVIRONMENT_LABEL", "unlabeled"),
         "platform": platform.platform(),
-        "processor": "Intel Core i3-10110U (2C/4T)",
+        "processor": processor or "unknown",
         "python_version": platform.python_version(),
-        "logical_cpus": 4,
-        "mem_total_bytes": 8 * 1024 ** 3,
+        "logical_cpus": os.cpu_count(),
+        "mem_total_bytes": (mem_total_kb * 1024) if mem_total_kb else None,
         "rustc": val(["rustc", "--version"]),
         "cargo": val(["cargo", "--version"]),
         "commit_hash": val(["git", "rev-parse", "HEAD"]),
