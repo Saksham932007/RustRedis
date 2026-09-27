@@ -8,8 +8,14 @@ This directory contains reproducible v12 experiment artifacts.
 - `aggregated_data.csv`: per-configuration statistics (mean, stddev, median, CV, 95% CI)
 - `metadata.json`: machine specs, runtime config, timestamp, commit hash
 - `graphs/`: publication-quality PNG figures
-- `run_data/`: detailed per-run logs and raw benchmark JSON
 - `anomaly_investigation/`: sharded-2key/c500 rerun with debug logging, CPU traces, and throughput traces
+
+Note: the per-run raw logs and benchmark JSON previously kept under
+`run_data/` (3059 files, ~83MB) have been removed from this working tree
+as repository cleanup — they were already archived (compressed) in
+`zenodo_package_upload/run_data.zip`, which is the canonical copy going
+forward. `raw_data.csv` and `aggregated_data.csv` in this directory remain
+the source of truth for analysis; nothing analytical was lost.
 
 ## Graphs
 
@@ -26,6 +32,5 @@ This directory contains reproducible v12 experiment artifacts.
 
 ## Raw Logs
 
-Detailed run logs are available under:
-
-- `/Users/sakshamkapoor/Projects/RustRedis/experiment_results_v12/run_data/20260420_090739`
+Detailed run logs for this data are archived in
+`zenodo_package_upload/run_data.zip` (see the note above).

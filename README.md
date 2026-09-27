@@ -3,15 +3,38 @@
 RustRedis is an experimental in-memory Redis-compatible key-value server written in Rust.  
 The project is focused on one research problem: how observability instrumentation affects throughput, tail latency, and stability under high concurrency.
 
-The current canonical benchmark snapshot is based on [reports/final_experiment_v5.md](reports/final_experiment_v5.md) and artifacts under [results/final_experiment_v5/20260418_200904](results/final_experiment_v5/20260418_200904).
+## Active work: RMIT redesign (current)
 
-## Current Experiment Snapshot (v5)
+Earlier benchmark runs (v5, v12) used a fixed-order runner: all repetitions
+of one strategy/concurrency configuration ran to completion before moving
+to the next. That design confounds strategy identity with whatever
+machine state (thermal, scheduling, memory pressure) drifted over the
+course of a multi-hour run — some configurations reported "fast" and
+"slow" throughput states that the fixed-order design cannot distinguish
+from a genuine strategy effect.
+
+The project is now moving to a **randomized, interleaved trial design
+(RMIT)** that shuffles the (strategy, concurrency) run order independently
+per repetition and logs machine state (CPU frequency, temperature,
+memory/swap, load average, AC/battery) alongside every run, so fast/slow
+states can be explained instead of just observed. See
+[docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md) for
+the full protocol and [benchmarks/run_rmit_experiment.py](benchmarks/run_rmit_experiment.py) /
+[benchmarks/analyze_rmit_results.py](benchmarks/analyze_rmit_results.py) for
+the runner and analysis. This phase runs on an Intel i3-10110U (2C/4T),
+8GB RAM laptop — see the protocol doc for hardware-appropriate defaults.
+
+The v5/v12 sections below are the **prior, superseded** benchmark
+snapshots (Apple M2 hardware, fixed-order runner) — kept for provenance,
+not as the current canonical result.
+
+## Legacy Experiment Snapshot (v5, superseded — see RMIT redesign above)
 
 | Parameter | Value |
 |---|---|
 | Run directory | `results/final_experiment_v5/20260418_200904` |
 | Timestamp | `2026-04-18T20:09:04+05:30` |
-| Host | `Sakshams-MacBook-Pro.local` |
+| Host | `redacted-host` |
 | CPU | `Apple M2` |
 | Logical / Physical CPU | `8 / 8` |
 | Memory | `8589934592` bytes (8 GiB) |
@@ -112,11 +135,23 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
   --output-dir results/manual_v5_like
 ```
 
-### 4. Useful automation scripts in this repo
+### 4. Run the current RMIT experiment (this laptop)
+
+```bash
+python3 benchmarks/run_rmit_experiment.py --output-dir experiment_results_rmit
+python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit/raw_data_rmit.csv
+```
+
+See [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md) before
+running this — it has a manual machine-control checklist (power, sleep,
+background processes) that materially affects result quality.
+
+### 5. Legacy automation scripts (v5/v12, fixed-order runner, superseded)
 
 - [benchmarks/run_final_matrix.sh](benchmarks/run_final_matrix.sh)
 - [benchmarks/run_macos_m2_research.sh](benchmarks/run_macos_m2_research.sh)
 - [benchmarks/run_paper_final_experiment.sh](benchmarks/run_paper_final_experiment.sh)
+- [benchmarks/run_final_experiment_v12.py](benchmarks/run_final_experiment_v12.py)
 
 ## Data and Reports
 
@@ -158,10 +193,11 @@ Core modules:
 
 ## Docs
 
+- [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md): current experiment protocol (i3 laptop, RMIT design)
 - [docs/README.md](docs/README.md)
 - [docs/system-design.md](docs/system-design.md)
 - [docs/failure-analysis.md](docs/failure-analysis.md)
-- [docs/macos_m2_experiment_protocol.md](docs/macos_m2_experiment_protocol.md)
+- [docs/macos_m2_experiment_protocol.md](docs/macos_m2_experiment_protocol.md): superseded, kept for provenance (M2 hardware)
 - [docs/legacy_docs_archive.md](docs/legacy_docs_archive.md)
 
 ## License

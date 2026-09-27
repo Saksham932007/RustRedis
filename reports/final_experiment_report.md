@@ -6,7 +6,7 @@
 - Cores: logical=8, physical=8
 - RAM: 8589934592 bytes
 - OS: ProductName:		macOS;ProductVersion:		26.4;BuildVersion:		25E246;
-- Kernel: Darwin Sakshams-MacBook-Pro.local 25.4.0 Darwin Kernel Version 25.4.0: Thu Mar 19 19:33:09 PDT 2026; root:xnu-12377.101.15~1/RELEASE_ARM64_T8112 arm64
+- Kernel: Darwin redacted-host 25.4.0 Darwin Kernel Version 25.4.0: Thu Mar 19 19:33:09 PDT 2026; root:xnu-12377.101.15~1/RELEASE_ARM64_T8112 arm64
 - Rust version: rustc 1.94.1 (e408947bf 2026-03-25)
 - Tokio version: 1.48.0
 - Experiment timestamp: 2026-04-13T20:12:18+05:30
