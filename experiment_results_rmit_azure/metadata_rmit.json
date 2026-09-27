@@ -1,0 +1,46 @@
+{
+  "design": "RMIT (randomized multiple interleaved trials): fresh random permutation of (strategy, concurrency) pairs per repetition; server restarted before every run.",
+  "run_id": "20260927_210652",
+  "timestamp_utc": "2026-09-27T23:04:18Z",
+  "machine_specs": {
+    "environment": "azure-vm-Standard_D4s_v6-centralindia",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "processor": "unrecorded (script bug at run time hardcoded the i3 laptop's processor string here; actual hardware was an Azure Standard_D4s_v6 VM, 4 vCPU / 16GB RAM, Central India region — fixed in benchmarks/run_rmit_experiment.py's collect_machine_specs to detect real hardware going forward)",
+    "python_version": "3.12.3",
+    "logical_cpus": 4,
+    "mem_total_bytes": 17179869184,
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "commit_hash": "e7d3d2589fab51abf68ca897c5d01bfa27749cd0"
+  },
+  "runtime_config": {
+    "strategies": [
+      "Disabled",
+      "GlobalMutex",
+      "Sharded-2key",
+      "ThreadLocal",
+      "HdrHistogram",
+      "Sharded-N"
+    ],
+    "concurrency_levels": [
+      100,
+      200,
+      300,
+      400,
+      500,
+      600,
+      700,
+      1000
+    ],
+    "repetitions": 30,
+    "requests_per_client": 1000,
+    "key_space": 10000,
+    "value_size": 64,
+    "seed": 314159265
+  },
+  "notes": [
+    "Run on a dedicated Azure Standard_D4s_v6 VM (4 vCPU / 16GB RAM, Central India), provisioned solely for this run and deleted immediately afterward. Nothing else was running on the VM — no agent session, no GUI, no other processes — so this is the 'clean' run the earlier laptop dataset (experiment_results_rmit/) could not be, since that one ran alongside an active Claude Code session.",
+    "temp_max_celsius and battery/AC fields are null throughout: this is a VM with no thermal sensors or battery, and benchmarks/system_state.py degrades to None for unavailable sysfs paths rather than failing, as designed.",
+    "Result: no configuration was flagged as bimodal (0/48), and relative 95% CI width was <=0.0175 for every configuration (tighter than the laptop run's <=0.039), with paired throughput ratios vs the disabled baseline all within 0.977-1.005 — i.e. instrumentation overhead was small and within noise once the machine was genuinely idle and randomized ordering was used."
+  ]
+}
