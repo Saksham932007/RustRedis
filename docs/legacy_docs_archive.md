@@ -356,7 +356,7 @@ Additional datasets retained as supplementary evidence:
 
 Primary matrix hardware metadata (`results/final_matrix/20260408_154844/machine_details.txt`):
 
-- Host: `Sakshams-MacBook-Pro.local`
+- Host: `redacted-host`
 - CPU architecture: `arm64` (Darwin kernel `RELEASE_ARM64_T8112`)
 - Logical CPUs: `8`
 - Physical CPUs: `8`

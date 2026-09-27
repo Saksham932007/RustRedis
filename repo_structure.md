@@ -29,17 +29,23 @@ This file provides a compact, maintained view of the repository layout.
 ## Benchmarking
 
 - benchmarks/src/main.rs: benchmark client
-- benchmarks/run_final_matrix.sh
-- benchmarks/run_macos_m2_research.sh
-- benchmarks/run_paper_final_experiment.sh
+- benchmarks/run_rmit_experiment.py: current randomized-interleaved-trials experiment runner
+- benchmarks/analyze_rmit_results.py: median+CI / two-state / paired-ratio analysis for RMIT data
+- benchmarks/system_state.py: per-run machine-state snapshot (CPU freq, temp, memory, load, power)
+- benchmarks/hardware_hypothesis_check.sh: thermal/scheduling/memory diagnostic script
+- benchmarks/run_final_matrix.sh: legacy, superseded
+- benchmarks/run_macos_m2_research.sh: legacy, superseded (M2 hardware)
+- benchmarks/run_paper_final_experiment.sh: legacy, superseded
+- benchmarks/run_final_experiment_v12.py: legacy fixed-order runner, superseded by run_rmit_experiment.py
 - benchmarks/generate_final_experiment_report.py
 
 ## Documentation
 
+- docs/rmit_experiment_protocol.md: current experiment protocol (i3-10110U/8GB laptop, RMIT design)
 - docs/README.md: docs index
 - docs/system-design.md
 - docs/failure-analysis.md
-- docs/macos_m2_experiment_protocol.md
+- docs/macos_m2_experiment_protocol.md: legacy, superseded (M2 hardware)
 - docs/legacy_docs_archive.md
 
 ## Reports

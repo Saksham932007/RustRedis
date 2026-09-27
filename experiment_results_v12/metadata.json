@@ -1,7 +1,7 @@
 {
   "timestamp_utc": "2026-04-20T11:10:29Z",
   "machine_specs": {
-    "hostname": "Sakshams-MacBook-Pro.local",
+    "hostname": "redacted-host",
     "platform": "macOS-26.4-arm64-arm-64bit-Mach-O",
     "processor": "arm",
     "python_version": "3.14.3",

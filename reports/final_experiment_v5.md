@@ -4,11 +4,11 @@
 
 - run_directory: results/final_experiment_v5/20260418_200904
 - timestamp: 2026-04-18T20:09:04+05:30
-- host: Sakshams-MacBook-Pro.local
+- host: redacted-host
 - cpu: Apple M2
 - runtime: rustc=rustc 1.94.1 (e408947bf 2026-03-25), cargo=cargo 1.94.1 (29ea6fb6a 2026-03-24)
 - os: ProductName:		macOS;ProductVersion:		26.4;BuildVersion:		25E246;
-- kernel: Darwin Sakshams-MacBook-Pro.local 25.4.0 Darwin Kernel Version 25.4.0: Thu Mar 19 19:33:09 PDT 2026; root:xnu-12377.101.15~1/RELEASE_ARM64_T8112 arm64
+- kernel: Darwin redacted-host 25.4.0 Darwin Kernel Version 25.4.0: Thu Mar 19 19:33:09 PDT 2026; root:xnu-12377.101.15~1/RELEASE_ARM64_T8112 arm64
 - logical_cpu: 8
 - physical_cpu: 8
 - memory_bytes: 8589934592

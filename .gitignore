@@ -2,3 +2,10 @@
 .DS_Store
 __pycache__/
 *.pyc
+
+# RMIT experiment raw per-run artifacts: keep raw_data_rmit.csv,
+# rmit_analysis.json/csv, and metadata_rmit.json, but don't commit the
+# thousands of per-run server logs / benchmark JSON under run_data/.
+experiment_results_rmit/run_data/
+hardware_diag.csv
+/tmp/hardware_diag_bench_out/
