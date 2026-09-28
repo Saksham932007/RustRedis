@@ -7,20 +7,21 @@ and how much that answer depends on benchmark design itself.
 
 ## TL;DR
 
-An earlier fixed-order benchmark design (v5/v12) reported throughput coefficients of
-variation up to **0.70** and unexplained bimodal "fast/slow" states. Redesigning the
-experiment around **Randomized Multiple Interleaved Trials (RMIT)** — a technique
+An earlier fixed-order benchmark (v5/v12, Apple M2) produced two throughput states
+(707 of 1,440 runs above 130,000 ops/s, 733 below; a 3.35x gap) that the run order
+confounded with the strategies — the no-metrics baseline was slower than an
+instrumented variant at 200 clients, and an identical-code rerun was 3.6x slower
+than the main run — so that dataset cannot rank the strategies. Repeating the
+comparison under **Randomized Multiple Interleaved Trials (RMIT)** — a technique
 proposed by Abedi, Heard & Brecht (2015) and shown necessary for cloud environments by
 [Abedi & Brecht, ICPE 2017](docs/paper_draft.md#1-motivation-and-related-work),
-not invented by this project — shuffling run order
-per repetition instead of grouping by strategy, and rerunning across three independent
-machines (a laptop and two cloud VMs), **eliminated the bimodal pattern entirely** (0 of
-240 configurations flagged as two-state, across all three datasets) and cut relative
-variability by roughly an order of magnitude. Under the corrected design, every
+not invented by this project — on three *other* machines (a Linux laptop and two Azure
+VMs) shows no two-state pattern (0 of 240 configurations flagged). Because the hardware
+and OS changed, that alone does not show RMIT removed the original pattern; an RMIT
+rerun on the original M2 is the missing test. On those machines every
 instrumentation strategy costs a small, consistent throughput overhead — **at most
-~2.3%**, holding steady from 100 to 3000 concurrent clients, with the top and bottom
-of the per-strategy ranking (thread_local cheapest, sharded_n tied-or-highest) holding
-across mixed/read-heavy/write-heavy workloads.
+~2.3%** at any tested concurrency from 100 to 3000 clients — with ThreadLocal cheapest
+and Sharded-2key second on all three; the order of the other three varies by machine.
 
 Full write-up, including related work and what this paper does and doesn't newly
 contribute: [docs/paper_draft.md](docs/paper_draft.md).
@@ -33,8 +34,8 @@ RustRedis has six interchangeable command-metrics collection strategies:
 |---|---|
 | `Disabled` | No command-level telemetry in the hot path (baseline). |
 | `GlobalMutex` | One global lock protects all command counters. |
-| `Sharded-2key` | Counters sharded across a fixed small key set. |
-| `Sharded-N` | Counters sharded across the full command-name key space. |
+| `Sharded-2key` | Concurrent map keyed by command name (two entries in practice: GET and SET). |
+| `Sharded-N` | Concurrent map keyed by the full logical (data) key — one entry per distinct key. |
 | `ThreadLocal` | Per-thread accumulation with periodic flush. |
 | `HdrHistogram` | Per-command latency histograms via the `hdrhistogram` crate. |
 
@@ -52,27 +53,30 @@ Three datasets, same design, different hardware and scope:
 | [experiment_results_rmit_azure](experiment_results_rmit_azure) | Azure `Standard_D4s_v6` (4 vCPU, 16GB) | 6 strategies × 8 concurrency (100–1000) | 1,440 | First clean-room run — VM dedicated solely to this benchmark |
 | [experiment_results_rmit_advanced](experiment_results_rmit_advanced) | Azure `Standard_D8s_v6` (8 vCPU, 32GB) | 6 strategies × 8 concurrency (100–3000) × 3 workloads | 2,160 | Adds read-heavy/write-heavy workloads and a 3× wider concurrency range |
 
-### No bimodal states, anywhere
+### No two-state pattern on the three RMIT machines
 
-The original v5/v12 runs reported an unexplained split between "fast" and "slow"
-throughput states at several configurations. The RMIT redesign's bimodal detector
+The original v5/v12 runs (Apple M2) showed a split between "fast" and "slow" throughput
+states in 11 of 48 configurations. The RMIT bimodal detector
 (`benchmarks/analyze_rmit_results.py`) found **0 flagged configurations across all
-three datasets** (0 of 48 on the laptop, 0 of 48 on Azure D4s_v6, 0 of 144 on Azure
-D8s_v6 — 240 configurations total) — the pattern did not reproduce once run order
-stopped being confounded with time.
+three RMIT datasets** (0 of 48 on the laptop, 0 of 48 on Azure D4s_v6, 0 of 144 on Azure
+D8s_v6 — 240 configurations total). As a positive control the same detector flags 8 of
+the 11 two-state configurations in the v12 data. **Caveat:** the RMIT machines differ
+from the original one (Linux/Azure vs. macOS/M2), so this absence is consistent with
+either "RMIT removed the pattern" or "the pattern was specific to the original machine";
+only an RMIT rerun on the M2 separates them (paper §5, §7).
 
-### Variability dropped by roughly an order of magnitude
+### Run-to-run variability on the RMIT machines
 
 Relative 95% bootstrap CI width on throughput (CI width ÷ median):
 
-| | v12 (flawed design) | RMIT laptop | RMIT Azure D4s_v6 | RMIT Azure D8s_v6 (advanced) |
+| | v12 (fixed order, M2) | RMIT laptop | RMIT Azure D4s_v6 | RMIT Azure D8s_v6 (advanced) |
 |---|---:|---:|---:|---:|
 | Mean | 0.176 (as CV) | 0.0129 | 0.0091 | 0.0177 |
 | Max | 0.698 (as CV) | 0.0386 | 0.0175 | 0.0420 |
 
-(v12's column is CV = stddev/mean, not CI width — not the identical statistic, but both
-measure spread relative to center, and the gap is large enough for the comparison to be
-meaningful regardless.)
+(v12's column is CV = stddev/mean, not CI width, and design, hardware, and OS all differ
+between the columns, so the gap is not attributable to the design alone. What it does show
+is that variability on the RMIT machines is low enough for the overhead comparison below.)
 
 ### Instrumentation overhead: small, consistent, at most ~2.3%
 
