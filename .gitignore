@@ -3,9 +3,15 @@
 __pycache__/
 *.pyc
 
+# Runtime persistence artifacts from local server runs — never intended
+# to be versioned (one accidentally made it in via Git LFS as a 243MB
+# blob; see repo cleanup history if you need the story).
+*.aof
+appendonly.aof*
+
 # RMIT experiment raw per-run artifacts: keep raw_data_rmit.csv,
 # rmit_analysis.json/csv, and metadata_rmit.json, but don't commit the
 # thousands of per-run server logs / benchmark JSON under run_data/.
-experiment_results_rmit/run_data/
+experiment_results_rmit*/run_data/
 hardware_diag.csv
 /tmp/hardware_diag_bench_out/
