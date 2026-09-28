@@ -16,9 +16,10 @@ throttling, background OS activity, frequency scaling), that drift gets
 absorbed into whichever configurations happen to run during the slow
 window — it looks like a strategy effect when it is actually a time
 effect. Randomized Multiple Interleaved Trials (RMIT) — a technique
-defined by Abedi & Brecht, "Conducting Repeatable Experiments in Highly
-Variable Cloud Computing Environments," ICPE 2017, not invented for this
-project — fixes this: every repetition executes all (strategy,
+proposed by Abedi, Heard & Brecht (2015) and shown necessary for cloud
+environments by Abedi & Brecht, "Conducting Repeatable Experiments in
+Highly Variable Cloud Computing Environments," ICPE 2017, not invented for
+this project — fixes this: every repetition executes all (strategy,
 concurrency) pairs in a fresh random order, so time-varying machine state
 is spread evenly across strategies instead of confounded with them. See
 `docs/paper_draft.md` §1 for the full related-work comparison, including
