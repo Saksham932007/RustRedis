@@ -4,10 +4,14 @@
 (laptop, Azure D4s_v6, Azure D8s_v6 with workload types and extended
 concurrency — 4,320 benchmark runs total). §6 (practical implications)
 and the power/minimum-detectable-effect analysis added to §4b and §7 are
-new additions interpreting those numbers, not new data. Remaining
-placeholder: the citation list in
-§1 (pull from the concept note — not reproduced in this repo, so left
-honestly unfilled rather than invented). §5's hardware-hypothesis script
+new additions interpreting those numbers, not new data. §1's citation
+list is now filled in with verified sources (author/venue/year checked
+against publisher and library records, not recalled from memory) —
+notably including Abedi and Brecht (2017), who define the RMIT technique
+this paper applies, and Laaber et al. (2019), whose cloud-microbenchmark
+methodology is structurally the closest prior work to this paper's own;
+§1 now states plainly what this paper does and does not contribute beyond
+theirs. §5's hardware-hypothesis script
 (`benchmarks/hardware_hypothesis_check.sh`) is only worth running if a
 laptop-side thermal/scheduling explanation is still wanted for
 completeness — the cloud VM results already show the original instability
@@ -22,10 +26,12 @@ sharded-N) under concurrent load. An earlier fixed-order benchmark design
 unexplained bimodal fast/slow pattern at several concurrency levels. We
 show this instability was an artifact of the benchmark's run ordering
 being confounded with time-varying machine and process state, not a
-property of the server. Redesigning the experiment as Randomized Multiple
-Interleaved Trials (RMIT) with per-run machine-state logging, and
-rerunning the full matrix on two independent machines (a 4-thread laptop
-and a dedicated 4-vCPU cloud VM), eliminates the bimodal pattern entirely
+property of the server. Redesigning the experiment around Randomized
+Multiple Interleaved Trials (RMIT) — a technique defined by Abedi and
+Brecht (2017) for exactly this class of problem, applied here to a new
+domain (§1) — with per-run machine-state logging, and rerunning the full
+matrix on two independent machines (a 4-thread laptop and a dedicated
+4-vCPU cloud VM), eliminates the bimodal pattern entirely
 (0 of 48 configurations flagged as two-state on either machine) and
 reduces relative 95% CI width on throughput from a mean of 0.176 (as CV,
 v12) to 0.0129 (laptop) and 0.0091 (cloud VM). Under the corrected design,
@@ -43,17 +49,154 @@ tied-or-most expensive) hold across all three workload types — the choice
 of instrumentation strategy does not meaningfully interact with
 read/write mix.
 
-## 1. Motivation
+## 1. Motivation and Related Work
 
-- Observability (per-command metrics/counters) is not free; the
-  implementation strategy for collecting it can dominate or disappear
-  into measurement noise depending on concurrency.
-- Prior work characterizes lock contention and counter-update overhead in
-  concurrent systems generally [CITATION NEEDED], but does not isolate the
-  specific strategy-vs-concurrency interaction this project measures.
-- [Cite the six papers from the concept note here — list not reproduced
-  in-repo; pull from wherever the concept note itself lives and fill in
-  full citations + one-sentence relevance for each.]
+Observability (per-command metrics/counters) is not free; the
+implementation strategy for collecting it can dominate or disappear into
+measurement noise depending on concurrency. This project asks two
+questions that turn out to be almost independent of each other: (1) how
+much does per-command metrics collection cost in a concurrent in-memory
+key-value store, and which collection strategy costs least, and (2) can a
+benchmark answer question (1) without a confound as large as the effect
+it's trying to measure — which, as §2 shows, the project's own first
+attempt could not.
+
+**On question (2) — benchmark methodology — closely related prior work
+exists, and one paper in particular already does most of what this
+paper's §3 presents as a "fix."** This needs to be stated plainly rather
+than glossed over:
+
+- **Abedi, A. and Brecht, T. (2017). "Conducting Repeatable Experiments
+  in Highly Variable Cloud Computing Environments." ICPE '17.** This
+  paper defines and names **Randomized Multiple Interleaved Trials
+  (RMIT)** — interleaving randomly-ordered trials of the configurations
+  under comparison so that time-varying environmental conditions land on
+  every configuration roughly equally, rather than confounding with one
+  of them — as a specific improvement over single-trial and
+  multiple-*consecutive*-trial designs for cloud performance comparisons.
+  **This is the same technique, under the same name, that this paper's §3
+  presents.** This project arrived at randomized interleaving
+  independently (motivated by §2's own evidence of order-confounded
+  instability, before this literature was found), but the technique
+  itself, its name, and its core justification are Abedi and Brecht's
+  contribution, not this project's. What this paper adds on top of theirs
+  is scoped to §3-§7's specific application: applying RMIT to per-command
+  observability-strategy comparison in a Rust in-memory key-value store
+  (a different domain than their EC2 network/disk/CPU traces), the
+  file-descriptor exhaustion failure mode in §3 (a systematic,
+  order-independent failure their design doesn't discuss), and the
+  explicit minimum-detectable-effect analysis in §7 (their paper
+  establishes RMIT's validity but does not report a power analysis for a
+  specific comparison).
+- **Laaber, C., Scheuner, J., and Leitner, P. (2019). "Software
+  Microbenchmarking in the Cloud. How Bad is it Really?" Empirical
+  Software Engineering, 24(4), 2469-2508.** This is the closest overall
+  prior work to this paper's actual method: it applies RMIT plus
+  bootstrap-based statistical comparison (Wilcoxon rank-sum and
+  overlapping confidence intervals) to detect performance slowdowns in
+  real open-source Java/Go microbenchmark suites run on public cloud
+  instances (AWS, GCE, Azure) against a bare-metal baseline, and reports
+  that this combination reliably detects slowdowns as small as ~10% with
+  20 instances. The design (RMIT + bootstrap CIs + cloud VMs +
+  quantifying detectable-effect size) is structurally the same recipe
+  this paper follows in §3, §4, and §7. The differences are the unit
+  under test (fine-grained library microbenchmarks across many unrelated
+  OSS projects vs. one server's own six instrumentation strategies under
+  realistic concurrent client load) and the tighter minimum detectable
+  effect this paper achieves (roughly 1-2%, §7) by using many
+  within-machine repetitions (15-30) of a single, cheap, fast-running
+  workload rather than comparing across many separately-provisioned
+  instances.
+- **Mytkowicz, T., Diwan, A., Hauswirth, M., and Sweeney, P. F. (2009).
+  "Producing Wrong Data Without Doing Anything Obviously Wrong!" ASPLOS
+  '09.** Documents that unrandomized, seemingly innocuous aspects of an
+  experimental setup (environment size, link order) silently bias
+  measured performance across widely-used architectures and compilers,
+  and that most published systems papers surveyed do not control for it.
+  Establishes that §2's failure mode (an unrandomized design producing a
+  wrong or unsupportable conclusion) is a documented, common pattern, not
+  a one-off mistake specific to this project.
+- **Georges, A., Buytaert, D., and Eeckhout, L. (2007). "Statistically
+  Rigorous Java Performance Evaluation." OOPSLA '07.** Establishes
+  reporting confidence intervals over many iterations, rather than a
+  single mean, as the standard for managed-runtime performance
+  evaluation. Basis for this project's move (§3, §6) from mean ± stddev
+  to bootstrap confidence intervals on the median.
+- **Kalibera, T. and Jones, R. E. (2013). "Rigorous Benchmarking in
+  Reasonable Time." ISMM '13.** Gives a principled method for choosing
+  how many repetitions a benchmark needs under a fixed time budget.
+  Directly relevant to this project's own repetition-count choices
+  (15 vs. 30 per cell across the three datasets) and to the power
+  analysis in §7, which is this paper's attempt at exactly the kind of
+  "is this enough repetitions" question Kalibera and Jones formalize.
+- **Curtsinger, C. and Berger, E. D. (2013). "STABILIZER: Statistically
+  Sound Performance Evaluation." ASPLOS '13.** A complementary
+  randomization approach: rather than randomizing *when* configurations
+  run (RMIT's approach, and this project's), STABILIZER randomizes
+  *where in memory* code and data land, to remove layout-driven
+  measurement bias from a single run. Cited here because it establishes
+  that "randomize an experimental factor that shouldn't matter but
+  secretly does" is a broader, recurring pattern in systems performance
+  evaluation, of which the run-order confound this project hit is one
+  instance among several documented in the literature.
+- **David, T., Guerraoui, R., and Trigonakis, V. (2013). "Everything You
+  Always Wanted to Know About Synchronization but Were Afraid to Ask."
+  SOSP '13.** Broad empirical study of lock and atomic-operation costs
+  across real hardware; background for why a global mutex, sharded
+  counters, and thread-local accumulation could plausibly differ in cost
+  under contention, motivating this project's choice of exactly those
+  strategies as the comparison set.
+- **Aspnes, J., Herlihy, M., and Shavit, N. (1994). "Counting Networks."
+  Journal of the ACM, 41(5), 1020-1048.** Foundational work on
+  low-contention concurrent counting via structured networks rather than
+  a single shared counter; the theoretical ancestor of this project's
+  sharded-counter strategies (`sharded_2key`, `sharded_n`).
+- **Boyd-Wickizer, S., Clements, A. T., Mao, Y., Pesterev, A., Kaashoek,
+  M. F., Morris, R., and Zeldovich, N. (2010). "An Analysis of Linux
+  Scalability to Many Cores." OSDI '10.** Introduces "sloppy counters"
+  (per-core counters reconciled periodically, rather than a single
+  contended shared counter) as a practical fix for kernel counter
+  contention on many-core Linux. The closest existing practical analogue
+  to this project's `thread_local` strategy, and consistent with this
+  paper's own finding (§4b) that `thread_local` is the cheapest strategy
+  in every dataset tested.
+- **Tallent, N. R., Mellor-Crummey, J., and Porterfield, A. (2010).
+  "Analyzing Lock Contention in Multithreaded Applications." PPoPP '10.**
+  Addresses the observer-effect problem directly: a measurement tool can
+  itself perturb the lock contention it is trying to measure. Relevant
+  motivation for why this project treats "does the metrics-collection
+  strategy itself add overhead" as a first-class, separately-measured
+  question (§4's overhead tables) rather than assuming instrumentation is
+  free.
+- **Sigelman, B. H. et al. (2010). "Dapper, a Large-Scale Distributed
+  Systems Tracing Infrastructure." Google Technical Report.** Industrial
+  evidence that per-request observability overhead is a real, actively
+  managed cost at scale — Google bounds Dapper's overhead to a small
+  fraction of one CPU core per machine via sampling specifically because
+  uncontrolled tracing overhead was judged unacceptable in production.
+  Motivates why precisely quantifying instrumentation overhead, as this
+  paper does, is a practically important question and not only an
+  academic one.
+- **Tene, G. "HdrHistogram: A High Dynamic Range Histogram."**
+  (Software, public domain.) The library underlying this project's
+  `hdr_histogram` metrics strategy; included for completeness since it is
+  referenced by name throughout §3-§7, not because it is a peer-reviewed
+  source.
+
+**What this leaves for this paper to contribute**, given the above: not
+the RMIT technique itself (Abedi and Brecht, 2017), not the general
+practice of randomized-order or bootstrap-based benchmarking (also
+Laaber et al., 2019; Georges et al., 2007), but (a) a specific,
+previously-unpublished empirical answer — the actual overhead of six
+named counter/histogram strategies in a Rust in-memory key-value store,
+replicated across three independent machines and up to 3000 concurrent
+clients, (b) the file-descriptor exhaustion failure mode in §3, which is
+a new, concrete instance of the "clean but wrong" measurement pathology
+Mytkowicz et al. describe in the abstract but which RMIT itself does not
+catch, and (c) an explicit power analysis (§7) quantifying exactly what
+effect sizes this specific experiment could and could not have detected,
+which neither Abedi and Brecht (2017) nor Laaber et al. (2019) report for
+their own comparisons.
 
 ## 2. The Flawed Original Design and Its Evidence
 
@@ -93,9 +236,16 @@ unstable configuration — the design cannot tell the two apart.
 
 ## 3. The Fixed Design: RMIT
 
-- Randomized Multiple Interleaved Trials: independent random permutation
-  of the full (strategy x concurrency) matrix per repetition
-  (`benchmarks/run_rmit_experiment.py`).
+Randomized Multiple Interleaved Trials (RMIT) — the technique applied in
+this section — is not new to this paper; it is defined and named by
+Abedi and Brecht (2017) as a fix for the same class of problem §2
+documents (see §1 for the full comparison to that paper and to Laaber et
+al. (2019), who apply the same technique with bootstrap confidence
+intervals to cloud microbenchmarking). This project's specific
+application:
+
+- Independent random permutation of the full (strategy x concurrency)
+  matrix per repetition (`benchmarks/run_rmit_experiment.py`).
 - Server restarted before every run (unavoidable once order is no longer
   strategy-grouped — every run is potentially a strategy switch).
 - Machine-state snapshot logged immediately before every run
@@ -390,8 +540,13 @@ per-sample output by eye before trusting an aggregate.
 
 ## 7. Limitations
 
-- The citation list in §1 is not yet filled in (concept note is external
-  to this repo).
+- §1's related-work discussion, while covering the closest prior
+  methodology papers found (Abedi and Brecht, 2017; Laaber et al., 2019)
+  and the relevant concurrency/observability background, is not a
+  systematic literature review; a venue-specific submission should widen
+  this search (e.g., database- and KV-store-specific benchmarking
+  methodology, which this pass did not find a close match for beyond the
+  general cloud/microbenchmarking literature cited).
 - The laptop run had an active development session sharing its 4 threads
   throughout (see caveat in `experiment_results_rmit/metadata_rmit.json`);
   the cloud VM run does not have this confound and should be treated as
@@ -450,8 +605,9 @@ question correctly. The original fixed-order benchmark (§2) reported
 throughput variability (CV up to 0.70) large enough to make any
 strategy-vs-strategy comparison meaningless — and traced that
 variability to the benchmark's own run ordering, not to the server.
-Redesigning the experiment as Randomized Multiple Interleaved Trials and
-rerunning it on three independent machines (a laptop and two
+Redesigning the experiment around Randomized Multiple Interleaved Trials
+(RMIT; Abedi and Brecht, 2017 — see §1) and rerunning it on three
+independent machines (a laptop and two
 purpose-provisioned cloud VMs, 4,320 total benchmark runs across 240
 distinct configurations) eliminated the bimodal instability entirely and
 cut relative variability by roughly an order of magnitude, letting a much
