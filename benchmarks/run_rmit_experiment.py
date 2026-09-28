@@ -63,6 +63,8 @@ STRATEGY_BY_KEY = {s.key: s for s in STRATEGIES}
 # 8GB laptop. Override with --concurrency / --runs for stronger hardware.
 DEFAULT_CONCURRENCY_LEVELS = [25, 50, 100, 150, 200, 300, 400, 500]
 DEFAULT_REPS = 15
+DEFAULT_WORKLOADS = ["mixed"]
+VALID_WORKLOADS = ("mixed", "read-heavy", "write-heavy")
 
 
 def parse_args() -> argparse.Namespace:
@@ -76,6 +78,13 @@ def parse_args() -> argparse.Namespace:
         "--concurrency",
         default=",".join(str(c) for c in DEFAULT_CONCURRENCY_LEVELS),
         help="Comma-separated concurrency levels",
+    )
+    p.add_argument(
+        "--workloads",
+        default=",".join(DEFAULT_WORKLOADS),
+        help=f"Comma-separated workload types, any of {VALID_WORKLOADS}. "
+             "Adding more than one makes this a 3-D design: strategy x concurrency x workload, "
+             "shuffled together per repetition.",
     )
     p.add_argument("--inter-run-cooldown-secs", type=float, default=2.0)
     p.add_argument("--run-retry-limit", type=int, default=3)
@@ -178,6 +187,7 @@ def run_bench_once(
     requests_per_client: int,
     key_space: int,
     value_size: int,
+    workload: str,
     run_dir: Path,
 ) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -188,7 +198,7 @@ def run_bench_once(
         "--concurrency", str(concurrency),
         "--requests", str(requests_per_client),
         "--runs", "1",
-        "--workload", "mixed",
+        "--workload", workload,
         "--key-space", str(key_space),
         "--value-size", str(value_size),
         "--output-dir", str(run_dir),
@@ -277,6 +287,10 @@ def main() -> None:
         build_binaries(root_dir)
 
     concurrency_levels = [int(c.strip()) for c in args.concurrency.split(",") if c.strip()]
+    workloads = [w.strip() for w in args.workloads.split(",") if w.strip()]
+    for w in workloads:
+        if w not in VALID_WORKLOADS:
+            raise SystemExit(f"Invalid workload '{w}'; must be one of {VALID_WORKLOADS}")
     rng = random.Random(args.seed)
 
     run_id = args.resume_run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -285,25 +299,29 @@ def main() -> None:
 
     raw_rows_path = output_dir / "raw_data_rmit.csv"
     fieldnames = [
-        "block_id", "order_in_block", "strategy", "strategy_label", "concurrency", "run_id",
+        "block_id", "order_in_block", "strategy", "strategy_label", "concurrency", "workload", "run_id",
         "throughput", "p50", "p99", "avg_latency", "latency_stddev", "latency_cv", "errors",
         "warmup_ops_per_client", "measured_ops_per_client",
     ] + system_state.STATE_FIELDNAMES
 
     # Resume support: if the CSV already exists, keep appending and skip
-    # (block, strategy, concurrency) combos already recorded.
+    # (block, strategy, concurrency, workload) combos already recorded.
     already_done: set = set()
     write_header = not raw_rows_path.exists()
     if raw_rows_path.exists():
         with raw_rows_path.open("r", newline="", encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
-                already_done.add((int(row["block_id"]), row["strategy"], int(row["concurrency"])))
+                already_done.add((
+                    int(row["block_id"]), row["strategy"], int(row["concurrency"]),
+                    row.get("workload", "mixed"),
+                ))
 
     total_blocks = args.runs
-    total_configs = len(STRATEGIES) * len(concurrency_levels)
+    total_configs = len(STRATEGIES) * len(concurrency_levels) * len(workloads)
     print(f"RMIT runner: {len(STRATEGIES)} strategies x {len(concurrency_levels)} concurrency levels "
-          f"x {total_blocks} repetitions = {total_configs * total_blocks} runs")
+          f"x {len(workloads)} workloads x {total_blocks} repetitions = {total_configs * total_blocks} runs")
     print(f"Concurrency levels: {concurrency_levels}")
+    print(f"Workloads: {workloads}")
     print(f"Output: {output_dir}")
 
     csv_file = raw_rows_path.open("a", newline="", encoding="utf-8")
@@ -314,21 +332,21 @@ def main() -> None:
 
     try:
         for block_id in range(1, total_blocks + 1):
-            pairs: List[Tuple[StrategySpec, int]] = [
-                (s, c) for s in STRATEGIES for c in concurrency_levels
+            triples: List[Tuple[StrategySpec, int, str]] = [
+                (s, c, w) for s in STRATEGIES for c in concurrency_levels for w in workloads
             ]
-            rng.shuffle(pairs)  # fresh random order every repetition (RMIT core requirement)
+            rng.shuffle(triples)  # fresh random order every repetition (RMIT core requirement)
 
-            print(f"\n=== Block {block_id}/{total_blocks} (shuffled order of {len(pairs)} configs) ===")
+            print(f"\n=== Block {block_id}/{total_blocks} (shuffled order of {len(triples)} configs) ===")
 
-            for order_in_block, (strategy, concurrency) in enumerate(pairs, start=1):
-                key = (block_id, strategy.key, concurrency)
+            for order_in_block, (strategy, concurrency, workload) in enumerate(triples, start=1):
+                key = (block_id, strategy.key, concurrency, workload)
                 if key in already_done:
-                    print(f"  [{order_in_block:>3}/{len(pairs)}] {strategy.key}/c{concurrency} "
+                    print(f"  [{order_in_block:>3}/{len(triples)}] {strategy.key}/c{concurrency}/{workload} "
                           f"(block {block_id}) — already recorded, skipping")
                     continue
 
-                cfg_dir = run_data_root / f"block{block_id}" / f"{strategy.key}_c{concurrency}"
+                cfg_dir = run_data_root / f"block{block_id}" / f"{strategy.key}_c{concurrency}_{workload}"
 
                 state = system_state.snapshot()
 
@@ -356,6 +374,7 @@ def main() -> None:
                             requests_per_client=args.requests_per_client,
                             key_space=args.key_space,
                             value_size=args.value_size,
+                            workload=workload,
                             run_dir=run_dir,
                         )
                         run_json = run_dir / "benchmark_results.json"
@@ -367,12 +386,13 @@ def main() -> None:
                                 "strategy": strategy.key,
                                 "strategy_label": strategy.label,
                                 "concurrency": concurrency,
+                                "workload": workload,
                                 "run_id": attempt,
                                 **parsed,
                                 **state,
                             }
                             break
-                        last_error = f"block={block_id} {strategy.key}/c{concurrency} attempt={attempt} rc={rc}"
+                        last_error = f"block={block_id} {strategy.key}/c{concurrency}/{workload} attempt={attempt} rc={rc}"
                         time.sleep(args.inter_run_cooldown_secs)
                 finally:
                     stop_server(server_proc, log_handle)
@@ -384,7 +404,7 @@ def main() -> None:
                 csv_file.flush()
 
                 print(
-                    f"  [{order_in_block:>3}/{len(pairs)}] {strategy.key:14s} c={concurrency:<4} "
+                    f"  [{order_in_block:>3}/{len(triples)}] {strategy.key:14s} c={concurrency:<4} {workload:12s} "
                     f"{row['throughput']:>9.0f} ops/sec  p99={row['p99']:>8.0f}us  "
                     f"cpu={state.get('cpu_freq_mean_mhz')}MHz temp={state.get('temp_max_celsius')}C "
                     f"load1={state.get('load_1m')} ac={state.get('ac_online')}"
@@ -397,13 +417,15 @@ def main() -> None:
     machine_specs = collect_machine_specs(root_dir)
     metadata = {
         "design": "RMIT (randomized multiple interleaved trials): fresh random permutation of "
-                  "(strategy, concurrency) pairs per repetition; server restarted before every run.",
+                  "(strategy, concurrency, workload) triples per repetition; server restarted "
+                  "before every run.",
         "run_id": run_id,
         "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "machine_specs": machine_specs,
         "runtime_config": {
             "strategies": [s.label for s in STRATEGIES],
             "concurrency_levels": concurrency_levels,
+            "workloads": workloads,
             "repetitions": args.runs,
             "requests_per_client": args.requests_per_client,
             "key_space": args.key_space,
