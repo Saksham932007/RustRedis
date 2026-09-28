@@ -1,13 +1,17 @@
 # Observability Overhead Under Concurrency in an In-Memory Key-Value Store: A Corrected Benchmark Design
 
-*Draft. Sections 2, 4, and 4b now report real numbers from three RMIT
-runs (laptop, D4s_v6 cloud VM, D8s_v6 cloud VM with workload types and
-extended concurrency). Remaining placeholder: the citation list in §1
-(pull from the concept note). §6's hardware-hypothesis results are only
-worth running if a laptop-side thermal/scheduling explanation is still
-wanted for completeness — the cloud VM results already show the original
-instability was never a server property to begin with.
-Target length: 4-6 pages.*
+*Draft. §2, §4, and §4b report real numbers from three RMIT runs
+(laptop, Azure D4s_v6, Azure D8s_v6 with workload types and extended
+concurrency — 4,320 benchmark runs total). §6 (practical implications)
+and the power/minimum-detectable-effect analysis added to §4b and §7 are
+new additions interpreting those numbers, not new data. Remaining
+placeholder: the citation list in
+§1 (pull from the concept note — not reproduced in this repo, so left
+honestly unfilled rather than invented). §5's hardware-hypothesis script
+(`benchmarks/hardware_hypothesis_check.sh`) is only worth running if a
+laptop-side thermal/scheduling explanation is still wanted for
+completeness — the cloud VM results already show the original instability
+was never a server property to begin with. Target length: 4-6 pages.*
 
 ## Abstract
 
@@ -33,10 +37,11 @@ design to three workload types (mixed, read-heavy, write-heavy) and
 concurrency up to 3000 clients on an 8-vCPU cloud VM: the "no bimodal
 states" and "small consistent overhead" findings both hold across the
 full 144-configuration matrix (still 0 flagged two-state), overhead stays
-under 2.2% at every concurrency level from 100 to 3000, and the
-per-strategy ranking (thread_local cheapest, sharded_n most expensive) is
-identical across all three workload types — the choice of instrumentation
-strategy does not interact with read/write mix.
+under 2.2% at every concurrency level from 100 to 3000, and the top and
+bottom of the per-strategy ranking (thread_local cheapest, sharded_n
+tied-or-most expensive) hold across all three workload types — the choice
+of instrumentation strategy does not meaningfully interact with
+read/write mix.
 
 ## 1. Motivation
 
@@ -180,8 +185,12 @@ saw the same condition):
 | sharded_n | 1.97% | 1.60% |
 | hdr_histogram | 2.14% | 1.42% |
 
-Ranking is consistent across both machines (thread_local cheapest,
-hdr_histogram most expensive), overhead is small on both (under 2.2%
+`thread_local` is cheapest on both machines, but the *most* expensive slot
+is not identical: `hdr_histogram` is highest on the laptop (2.14%) while
+`sharded_n` is highest on the cloud VM (1.60% vs. `hdr_histogram`'s 1.42%)
+— the two swap places at the bottom of the ranking (see §4b for the full
+three-dataset cross-check of which parts of this ranking replicate and
+which don't). Overhead is small on both machines regardless (under 2.2%
 everywhere), and the cloud VM's numbers are uniformly a bit lower than the
 laptop's — consistent with the laptop dataset carrying some contention
 from the development session sharing its 4 threads, rather than any
@@ -241,13 +250,20 @@ overhead across all 8 concurrency levels for each workload:
 | global_mutex | 1.74% | 1.40% | 1.79% |
 | sharded_n | 1.73% | 2.15% | 2.07% |
 
-The ranking (`thread_local` < `sharded_2key` < {`hdr_histogram`,
-`global_mutex`} < `sharded_n`) is identical across all three workloads;
-only the exact percentages shift by a few tenths of a point. This is a
-negative result worth stating plainly: read/write mix was a plausible
-place for instrumentation cost to interact with workload (e.g. if a
-strategy's overhead were dominated by write-path lock contention, a
-write-heavy workload might expose it more) and it does not.
+`thread_local` is cheapest and `sharded_2key` is second-cheapest in all
+three workloads — that part of the ranking is exactly identical.
+`sharded_n` is clearly the most expensive strategy in read-heavy (2.15%)
+and write-heavy (2.07%); in mixed it is nominally 0.01 percentage points
+behind `global_mutex` (1.73% vs. 1.74%), a gap so far below this design's
+minimum detectable effect (§7) that the honest reading is "`global_mutex`
+and `sharded_n` are tied for most expensive in the mixed workload, and
+`sharded_n` is unambiguously most expensive in the other two." This is a
+negative result worth stating plainly regardless: read/write mix was a
+plausible place for instrumentation cost to interact with workload (e.g.
+if a strategy's overhead were dominated by write-path lock contention, a
+write-heavy workload might expose it more), and — for the two strategies
+at the top of the ranking, and for `sharded_n` at the bottom — it does
+not.
 
 **The "crossovers" the analysis script flags are noise, not signal.**
 `benchmarks/analyze_rmit_results.py`'s crossover detector (which strategy
@@ -263,29 +279,42 @@ supports detecting a real one, but the correct reading of this specific
 dataset is "no meaningful crossover found" — overhead is flat and small
 across the entire tested range.
 
-**The ranking's endpoints are not noise, even though most adjacent gaps
+**The top of the ranking is not noise, even though most adjacent gaps
 are.** It's worth being precise about which parts of "no significant
 difference" actually mean "we detected no difference" versus "any
 difference here is too small for this design to see" (see the
-minimum-detectable-effect numbers in §6). Across all three independent
-datasets — laptop, Azure D4s_v6, and Azure D8s_v6 (§4's table and this
-section's workload table) — `thread_local` has the lowest overhead of all
-six strategies every time, and `{hdr_histogram, sharded_n}` occupy the two
-highest-overhead slots every time (though which of the two is costlier
-flips between datasets: `hdr_histogram` > `sharded_n` on the laptop,
-`sharded_n` > `hdr_histogram` on Azure D4s_v6). No single adjacent-strategy
-gap in any one dataset clears that dataset's minimum detectable effect, so
-this isn't a "statistically significant" pairwise claim in any one run.
-But three independently-provisioned machines agreeing on which strategy
-sits at the top and which two sit at the bottom of the ranking is not the
-behavior pure per-run noise would produce — noise would put a different
-strategy on top in each dataset about as often as not. We read this as a
-small, genuine, consistent effect (thread-local storage measurably avoids
-some synchronization cost the other five strategies all pay in some form),
-distinct from the crossover claims above, which really are noise: a
-crossover is a single-dataset, single-concurrency-level event with no
-cross-dataset replication behind it, while the ranking-endpoint finding
-replicates three times independently.
+minimum-detectable-effect numbers in §6). Ranking all six strategies by
+mean overhead within each of the three independent datasets — laptop,
+Azure D4s_v6, and Azure D8s_v6 (§4's table and this section's workload
+table) — gives:
+
+| Rank | Laptop | Azure D4s_v6 | Azure D8s_v6 (advanced) |
+|---:|---|---|---|
+| 1 (cheapest) | thread_local | thread_local | thread_local |
+| 2 | sharded_2key | sharded_2key | sharded_2key |
+| 3 | global_mutex | global_mutex | hdr_histogram |
+| 4 | sharded_n | hdr_histogram | global_mutex |
+| 5 (most expensive) | hdr_histogram | sharded_n | sharded_n |
+
+`thread_local` takes rank 1 and `sharded_2key` takes rank 2 in all three
+independently-provisioned datasets — that part of the ranking is stable.
+Ranks 3-4 reshuffle between datasets (`global_mutex` and `hdr_histogram`
+trade places), and `sharded_n` is in the bottom two everywhere but is not
+always dead last. No single adjacent-strategy gap in any one dataset
+clears that dataset's minimum detectable effect, so none of this is a
+"statistically significant" pairwise claim in any single run. But three
+independently-provisioned machines agreeing on which strategy takes rank 1
+and which takes rank 2 is not the behavior pure per-run noise would
+produce — noise would put a different strategy on top in each dataset
+about as often as not. We read the rank-1/rank-2 finding as a small,
+genuine, consistent effect (thread-local storage and a small fixed shard
+count both measurably avoid some synchronization cost the other three
+strategies pay in some form), distinct from both the crossover claims
+above (which really are noise) and the ranks-3-through-5 reshuffling
+(which is also most plausibly noise, since it doesn't replicate in a
+fixed order across datasets). A crossover, and a rank-3-vs-4 swap, are
+each single-dataset events with no cross-dataset replication behind them;
+the rank-1/rank-2 finding replicates three times independently.
 
 ## 5. Explaining the Machine States (Partial)
 
@@ -309,7 +338,57 @@ by the design fix itself, with the hardware hypotheses now a secondary,
 optional line of investigation rather than a load-bearing part of the
 paper's argument.
 
-## 6. Limitations
+## 6. Practical Implications
+
+Two audiences can act on this work directly.
+
+**For anyone choosing a metrics-collection strategy for a similar
+concurrent server:** the overhead of per-command observability here is
+small enough (under 2.3% at every concurrency level tested, on every
+workload and every machine) that "does instrumentation cost too much" is
+not, by itself, a reason to leave it disabled in production for a system
+in this class (single-process, in-memory, network-bound). Within that
+small budget, the choice of *strategy* still matters in a stable way:
+`thread_local` accumulation is the cheapest strategy on every machine we
+tested and is the safe default when overhead must be minimized; if
+per-command latency histograms (not just counters) are required,
+`hdr_histogram` costs more but the extra cost (roughly 1.4-2.1
+percentage points versus `disabled`, depending on machine) buys detailed
+tail-latency visibility that flat counters cannot provide, so it is a
+reasonable trade rather than a strategy to avoid. `sharded_n` — sharding
+counters across the full command-name key space — showed no throughput
+advantage over a plain `global_mutex` at the concurrency levels tested
+(4-8 vCPUs, up to 3000 clients); the extra implementation complexity of
+per-key sharding is not paying for itself here, and would only be worth
+revisiting at core counts or contention levels well beyond what this
+project tested (see §7's scope limits).
+
+**For anyone designing a similar concurrency benchmark:** the more
+general and arguably more durable finding is methodological, not about
+this server. A fixed-order design (finish every repetition of
+configuration A, then move to configuration B) cannot distinguish "this
+configuration is unstable" from "the machine happened to be in a slow
+state while this configuration was running" — §2 shows this is not a
+hypothetical failure mode but the actual, demonstrated cause of a
+throughput CV as high as 0.70 in this project's own earlier work.
+Randomizing configuration order per repetition (RMIT) is a cheap fix
+(no new hardware, no new measurement instrumentation, just a different
+loop order) that turned that same measurement into a CV an order of
+magnitude tighter, on the same class of hardware. Any benchmark that
+compares more than one configuration under conditions that can drift
+over the run's wall-clock duration (thermal state, background load,
+cache warmth, OS scheduling decisions) is exposed to the same
+confound, independent of what is being measured — this is a general
+argument for randomized-order benchmarking, not a claim specific to
+metrics-collection strategies or to this codebase. §3's file-descriptor
+pitfall is a second, separate, general lesson: a systematic
+infrastructure failure can produce clean, low-variance, entirely
+*consistent* wrong numbers, which is the opposite signature of the
+noisy instability a randomized design is built to catch — no
+benchmark design substitutes for inspecting a small dry run's raw
+per-sample output by eye before trusting an aggregate.
+
+## 7. Limitations
 
 - The citation list in §1 is not yet filled in (concept note is external
   to this repo).
@@ -355,11 +434,40 @@ paper's argument.
   read as *this design's power is exhausted at gaps below roughly 1-2%*,
   not as *no difference exists* — a true effect smaller than the relevant
   MDE could be present in any single dataset without this design being
-  able to see it. The one claim in §4b that survives this caveat is the
-  ranking-endpoints finding (`thread_local` cheapest, `{hdr_histogram,
-  sharded_n}` most expensive, replicated across all three independent
-  datasets) — replication across three separately-powered datasets is
-  evidence even where no single dataset's pairwise CI excludes zero.
+  able to see it. The one claim in §4b that survives this caveat is that
+  `thread_local` takes rank 1 (cheapest) and `sharded_2key` takes rank 2
+  in all three independent datasets — replication across three
+  separately-powered datasets is evidence even where no single dataset's
+  pairwise CI excludes zero. Ranks 3-5 (`global_mutex`, `hdr_histogram`,
+  `sharded_n`) reshuffle between datasets and are not claimed to be
+  distinguishable from each other.
+
+## 8. Conclusion
+
+Started as a question about the cost of per-command observability, this
+project's main deliverable ended up being about how to *ask* that
+question correctly. The original fixed-order benchmark (§2) reported
+throughput variability (CV up to 0.70) large enough to make any
+strategy-vs-strategy comparison meaningless — and traced that
+variability to the benchmark's own run ordering, not to the server.
+Redesigning the experiment as Randomized Multiple Interleaved Trials and
+rerunning it on three independent machines (a laptop and two
+purpose-provisioned cloud VMs, 4,320 total benchmark runs across 240
+distinct configurations) eliminated the bimodal instability entirely and
+cut relative variability by roughly an order of magnitude, letting a much
+smaller, real signal come through cleanly: every instrumentation
+strategy tested costs a small, flat overhead (never above 2.3%,
+regardless of concurrency from 25 to 3000 clients or workload mix), with
+`thread_local` reliably cheapest and `sharded_2key` reliably second across
+all three independent runs. A rough power analysis (§7) shows this design
+can detect overhead differences down to roughly 1-2% depending on the
+dataset — comfortably enough to support the headline claims, while making
+clear that finer distinctions among the three middle-ranked strategies
+are noise-limited, not resolved. §6 turns both findings into concrete
+guidance: which strategy to reach for depending on whether latency
+histograms are needed, and why randomized-order benchmarking is worth
+adopting for any comparison susceptible to time-varying machine state,
+independent of what is being compared.
 
 ## Appendix: Reproducibility
 
