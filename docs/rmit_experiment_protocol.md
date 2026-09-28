@@ -52,6 +52,12 @@ The run is resumable: if it's interrupted, rerunning the same command
 (same `--output-dir`) skips (block, strategy, concurrency) combinations
 already recorded in `raw_data_rmit.csv`.
 
+By default the script builds `server` and the `benchmarks/` client itself
+before running (`cargo build --release`, once, at startup) — you do not
+need to build either binary by hand first. Pass `--skip-build` to skip
+this (the cloud-VM commands later in this doc do, since those binaries
+were just built explicitly in the preceding step).
+
 ## Step 2 — Control the machine (manual checklist, do this before starting)
 
 This is on you to do physically before kicking off a run — nothing here

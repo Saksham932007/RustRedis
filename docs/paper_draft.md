@@ -263,6 +263,30 @@ supports detecting a real one, but the correct reading of this specific
 dataset is "no meaningful crossover found" — overhead is flat and small
 across the entire tested range.
 
+**The ranking's endpoints are not noise, even though most adjacent gaps
+are.** It's worth being precise about which parts of "no significant
+difference" actually mean "we detected no difference" versus "any
+difference here is too small for this design to see" (see the
+minimum-detectable-effect numbers in §6). Across all three independent
+datasets — laptop, Azure D4s_v6, and Azure D8s_v6 (§4's table and this
+section's workload table) — `thread_local` has the lowest overhead of all
+six strategies every time, and `{hdr_histogram, sharded_n}` occupy the two
+highest-overhead slots every time (though which of the two is costlier
+flips between datasets: `hdr_histogram` > `sharded_n` on the laptop,
+`sharded_n` > `hdr_histogram` on Azure D4s_v6). No single adjacent-strategy
+gap in any one dataset clears that dataset's minimum detectable effect, so
+this isn't a "statistically significant" pairwise claim in any one run.
+But three independently-provisioned machines agreeing on which strategy
+sits at the top and which two sit at the bottom of the ranking is not the
+behavior pure per-run noise would produce — noise would put a different
+strategy on top in each dataset about as often as not. We read this as a
+small, genuine, consistent effect (thread-local storage measurably avoids
+some synchronization cost the other five strategies all pay in some form),
+distinct from the crossover claims above, which really are noise: a
+crossover is a single-dataset, single-concurrency-level event with no
+cross-dataset replication behind it, while the ranking-endpoint finding
+replicates three times independently.
+
 ## 5. Explaining the Machine States (Partial)
 
 The Azure results are themselves informative here: two dedicated, idle
@@ -313,6 +337,29 @@ paper's argument.
   for the first cloud VM run, trading some statistical tightness (mean CI
   width 0.0177 vs 0.0091) for 3x the design coverage (workload type x
   wider concurrency range) within a comparable wall-clock budget.
+- **What "no significant difference" can and can't rule out.** Using the
+  paired within-block strategy/`disabled` throughput ratios (the same
+  comparison §4's overhead tables are built from) and a standard paired
+  two-sided design (`MDE ≈ (z_.975 + z_.80) × SD / sqrt(n)`, i.e. 80%
+  power at a 95% confidence level), the smallest overhead this design
+  could reliably detect, per dataset, is approximately **1.5% on the
+  laptop** (pooled paired-ratio SD 0.021, n=15 reps/cell), **0.9% on Azure
+  D4s_v6** (SD 0.017, n=30), and **2.1% on Azure D8s_v6 / advanced** (SD
+  0.029, n=15) — recomputed directly from each dataset's
+  `raw_data_rmit.csv` (script: `benchmarks/analyze_rmit_results.py`'s
+  paired-ratio logic, extended with a stdev/MDE calculation). Most of the
+  adjacent-strategy gaps in §4 and §4b's tables (often 0.2-0.5
+  percentage points) are below this floor in at least one dataset. This
+  means "no significant crossover" and "adjacent strategies are
+  statistically indistinguishable at a given concurrency level" should be
+  read as *this design's power is exhausted at gaps below roughly 1-2%*,
+  not as *no difference exists* — a true effect smaller than the relevant
+  MDE could be present in any single dataset without this design being
+  able to see it. The one claim in §4b that survives this caveat is the
+  ranking-endpoints finding (`thread_local` cheapest, `{hdr_histogram,
+  sharded_n}` most expensive, replicated across all three independent
+  datasets) — replication across three separately-powered datasets is
+  evidence even where no single dataset's pairwise CI excludes zero.
 
 ## Appendix: Reproducibility
 
