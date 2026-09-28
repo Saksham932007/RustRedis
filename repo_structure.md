@@ -13,8 +13,9 @@ This file provides a compact, maintained view of the repository layout.
 - reports/: written-up experiment reports (one per project version)
 - figures/: publication figure set
 - results/: legacy (pre-v12) raw benchmark trees
-- experiment_results_v12/, experiment_results_rmit/, experiment_results_rmit_azure/:
-  per-experiment-version datasets (aggregated CSV/JSON + analysis outputs)
+- experiment_results_v12/, experiment_results_rmit/, experiment_results_rmit_azure/,
+  experiment_results_rmit_advanced/: per-experiment-version datasets
+  (aggregated CSV/JSON + analysis outputs)
 - zenodo_package_upload/: packaged Zenodo deposition (zips) for the v12 dataset
 - Provenance files kept at root (see "Historical/provenance files" below):
   final_experiment_v12.json, final_experiment_summary.md, v15_evidence.json,
@@ -33,7 +34,7 @@ This file provides a compact, maintained view of the repository layout.
 ## Benchmarking
 
 - benchmarks/src/main.rs: benchmark client
-- benchmarks/run_rmit_experiment.py: current randomized-interleaved-trials experiment runner
+- benchmarks/run_rmit_experiment.py: current randomized-interleaved-trials experiment runner (strategy x concurrency x workload, --workloads mixed/read-heavy/write-heavy)
 - benchmarks/analyze_rmit_results.py: median+CI / two-state / paired-ratio analysis for RMIT data
 - benchmarks/system_state.py: per-run machine-state snapshot (CPU freq, temp, memory, load, power)
 - benchmarks/hardware_hypothesis_check.sh: thermal/scheduling/memory diagnostic script
@@ -75,7 +76,8 @@ This file provides a compact, maintained view of the repository layout.
   raw logs were removed from the working tree (already archived compressed in
   zenodo_package_upload/run_data.zip) — only aggregated CSV/JSON remain.
 - experiment_results_rmit/: current design, laptop hardware (i3-10110U)
-- experiment_results_rmit_azure/: current design, cloud VM (Azure Standard_D4s_v6) — the clean-room dataset
+- experiment_results_rmit_azure/: current design, cloud VM (Azure Standard_D4s_v6), mixed workload only — the first clean-room dataset
+- experiment_results_rmit_advanced/: current design, cloud VM (Azure Standard_D8s_v6), 3 workload types x concurrency up to 3000 — the largest and most complete dataset
 - results/: pre-v12 raw benchmark trees (final_experiment, final_matrix,
   macos_m2, metrics_strategy_mandatory, system_validation_v15) — legacy,
   kept as-is for provenance; not part of the current experiment pipeline.

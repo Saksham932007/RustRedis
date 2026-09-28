@@ -207,3 +207,35 @@ Notes:
 - **Always delete the resource group as soon as you've pulled the
   results.** A D4s_v6 in Central India costs about $0.21/hour — trivial
   for a ~2 hour run, but there's no reason to let it idle afterward.
+
+## Raise the file-descriptor limit before testing high concurrency
+
+`experiment_results_rmit_advanced/` pushed concurrency up to 3000 clients
+on a `Standard_D8s_v6` (8 vCPU / 32GB RAM) and added `--workloads
+mixed,read-heavy,write-heavy` as a third RMIT dimension:
+
+```bash
+RMIT_ENVIRONMENT_LABEL=azure-vm-Standard_D8s_v6-centralindia \
+  python3 benchmarks/run_rmit_experiment.py --output-dir experiment_results_rmit_advanced \
+  --runs 15 --concurrency 100,250,500,750,1000,1500,2000,3000 \
+  --workloads mixed,read-heavy,write-heavy --skip-build
+```
+
+The first attempt at this silently failed: every run above roughly
+c=1000 reported exactly `0 ops/sec`, with rc=0 and a validly-formed JSON
+result — nothing about it looked like a crash. The cause was the default
+open-file-descriptor soft limit on a fresh Ubuntu VM (`ulimit -n` = 1024)
+being far below the concurrency levels being tested; every client
+thread's `connect()` failed, and the benchmark client counts connection
+failures into its error total rather than aborting the run, so it
+"succeeded" while measuring nothing.
+
+`run_rmit_experiment.py` now calls `raise_fd_limit()` once at startup,
+which raises its own `RLIMIT_NOFILE` soft limit toward the hard limit —
+subprocesses (server and benchmark client) inherit this automatically, no
+root or `/etc/security/limits.conf` edit needed. It also prints a warning
+if the achieved limit still can't cover the highest requested concurrency
+level. **Before trusting a run at concurrency above ~1000, check
+`ulimit -Hn` on the machine (or container) it'll run on**, and look at a
+1-repetition dry run's per-run throughput numbers by eye — a suspiciously
+*clean*, *uniform* zero across many runs is this failure mode, not noise.

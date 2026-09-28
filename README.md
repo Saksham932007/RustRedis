@@ -171,8 +171,9 @@ background processes) that materially affects result quality.
   - [results/system_validation_v15](results/system_validation_v15)
 - Current (RMIT) datasets:
   - [experiment_results_rmit](experiment_results_rmit) — laptop run
-  - [experiment_results_rmit_azure](experiment_results_rmit_azure) — cloud VM run
-  - [docs/paper_draft.md](docs/paper_draft.md) — write-up with both datasets' results
+  - [experiment_results_rmit_azure](experiment_results_rmit_azure) — cloud VM run (D4s_v6, mixed workload)
+  - [experiment_results_rmit_advanced](experiment_results_rmit_advanced) — cloud VM run (D8s_v6, 3 workload types, concurrency up to 3000)
+  - [docs/paper_draft.md](docs/paper_draft.md) — write-up with all three datasets' results
 
 ## Architecture Overview
 
