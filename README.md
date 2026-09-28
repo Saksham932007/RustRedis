@@ -1,111 +1,155 @@
 # RustRedis
 
-RustRedis is an experimental in-memory Redis-compatible key-value server written in Rust.  
-The project is focused on one research problem: how observability instrumentation affects throughput, tail latency, and stability under high concurrency.
+RustRedis is an experimental in-memory Redis-compatible key-value server written in Rust.
+The project studies one research problem: how observability instrumentation (per-command
+metrics collection) affects throughput, tail latency, and stability under concurrent load,
+and how much that answer depends on benchmark design itself.
 
-## Active work: RMIT redesign (current)
+## TL;DR
 
-Earlier benchmark runs (v5, v12) used a fixed-order runner: all repetitions
-of one strategy/concurrency configuration ran to completion before moving
-to the next. That design confounds strategy identity with whatever
-machine state (thermal, scheduling, memory pressure) drifted over the
-course of a multi-hour run — some configurations reported "fast" and
-"slow" throughput states that the fixed-order design cannot distinguish
-from a genuine strategy effect.
+An earlier fixed-order benchmark design (v5/v12) reported throughput coefficients of
+variation up to **0.70** and unexplained bimodal "fast/slow" states. Redesigning the
+experiment as **Randomized Multiple Interleaved Trials (RMIT)** — shuffling run order
+per repetition instead of grouping by strategy — and rerunning across three independent
+machines (a laptop and two cloud VMs) **eliminated the bimodal pattern entirely** (0 of
+240 configurations flagged as two-state, across all three datasets) and cut relative
+variability by roughly an order of magnitude. Under the corrected design, every
+instrumentation strategy costs a small, consistent throughput overhead — **never more
+than 2.3%**, holding steady from 100 to 3000 concurrent clients and identically ranked
+across mixed/read-heavy/write-heavy workloads.
 
-The project is now moving to a **randomized, interleaved trial design
-(RMIT)** that shuffles the (strategy, concurrency) run order independently
-per repetition and logs machine state (CPU frequency, temperature,
-memory/swap, load average, AC/battery) alongside every run, so fast/slow
-states can be explained instead of just observed. See
-[docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md) for
-the full protocol and [benchmarks/run_rmit_experiment.py](benchmarks/run_rmit_experiment.py) /
-[benchmarks/analyze_rmit_results.py](benchmarks/analyze_rmit_results.py) for
-the runner and analysis. This phase runs on an Intel i3-10110U (2C/4T),
-8GB RAM laptop — see the protocol doc for hardware-appropriate defaults.
+Full write-up: [docs/paper_draft.md](docs/paper_draft.md).
 
-The v5/v12 sections below are the **prior, superseded** benchmark
-snapshots (Apple M2 hardware, fixed-order runner) — kept for provenance,
-not as the current canonical result.
+## What is being compared
 
-## Legacy Experiment Snapshot (v5, superseded — see RMIT redesign above)
+RustRedis has six interchangeable command-metrics collection strategies:
 
-| Parameter | Value |
+| Strategy | Description |
 |---|---|
-| Run directory | `results/final_experiment_v5/20260418_200904` (not present in this repo — the raw v5 run tree was never committed; the report and table below are the surviving record) |
-| Timestamp | `2026-04-18T20:09:04+05:30` |
-| Host | `redacted-host` |
-| CPU | `Apple M2` |
-| Logical / Physical CPU | `8 / 8` |
-| Memory | `8589934592` bytes (8 GiB) |
-| OS | `macOS 26.4 (25E246)` |
-| Rust toolchain | `rustc 1.94.1`, `cargo 1.94.1` |
-| Strategies | `Disabled`, `GlobalMutex`, `Sharded`, `ThreadLocal` |
-| Shard count | `64` |
-| ThreadLocal flush | `1000 records or 100ms` |
-| Workload | Mixed (`50% GET / 50% SET`) |
-| Runs per configuration | `30` |
-| Concurrency levels | `100`, `500`, `1000` |
-| Requests per client | `1000` |
-| Total requests per config | `100000`, `500000`, `1000000` |
-| Reproducible runner command (report) | `./benchmarks/run_final_experiment_v5.sh` |
-| Server restart per config | `true` |
-| Waits | `3s` before benchmark, `3s` between runs, `5s` between strategies |
+| `Disabled` | No command-level telemetry in the hot path (baseline). |
+| `GlobalMutex` | One global lock protects all command counters. |
+| `Sharded-2key` | Counters sharded across a fixed small key set. |
+| `Sharded-N` | Counters sharded across the full command-name key space. |
+| `ThreadLocal` | Per-thread accumulation with periodic flush. |
+| `HdrHistogram` | Per-command latency histograms via the `hdrhistogram` crate. |
 
-## What Is Being Compared
+Each strategy runs the same workload and client counts, so any throughput/latency
+difference isolates observability overhead and contention behavior rather than
+something else changing between runs.
 
-RustRedis has interchangeable command-metrics collection strategies:
+## RMIT results (current)
 
-- `Disabled`: no command-level telemetry in the hot path.
-- `GlobalMutex`: one global lock protects all command counters.
-- `Sharded`: counters are distributed across shards.
-- `ThreadLocal`: per-thread accumulation with periodic flush.
+Three datasets, same design, different hardware and scope:
 
-Each strategy is benchmarked on the same workload and client counts to isolate observability overhead and contention behavior.
+| Dataset | Hardware | Matrix | Runs | Notes |
+|---|---|---|---:|---|
+| [experiment_results_rmit](experiment_results_rmit) | Intel i3-10110U laptop (2C/4T, 8GB) | 6 strategies × 8 concurrency (25–500) | 720 | A dev session ran alongside this one — see caveat below |
+| [experiment_results_rmit_azure](experiment_results_rmit_azure) | Azure `Standard_D4s_v6` (4 vCPU, 16GB) | 6 strategies × 8 concurrency (100–1000) | 1,440 | First clean-room run — VM dedicated solely to this benchmark |
+| [experiment_results_rmit_advanced](experiment_results_rmit_advanced) | Azure `Standard_D8s_v6` (8 vCPU, 32GB) | 6 strategies × 8 concurrency (100–3000) × 3 workloads | 2,160 | Adds read-heavy/write-heavy workloads and a 3× wider concurrency range |
 
-## v5 Aggregated Results (30 successful runs each)
+### No bimodal states, anywhere
 
-Values below are copied from [reports/final_experiment_v5.md](reports/final_experiment_v5.md), Section 3 and Section 4.
+The original v5/v12 runs reported an unexplained split between "fast" and "slow"
+throughput states at several configurations. The RMIT redesign's bimodal detector
+(`benchmarks/analyze_rmit_results.py`) found **0 flagged configurations across all
+three datasets** (0 of 48 on the laptop, 0 of 48 on Azure D4s_v6, 0 of 144 on Azure
+D8s_v6 — 240 configurations total) — the pattern did not reproduce once run order
+stopped being confounded with time.
 
-| Strategy | Clients | Throughput Mean (ops/sec) | Throughput CV | p99 Mean (us) | p99 CV | Stability (Throughput / p99) |
-|---|---:|---:|---:|---:|---:|---|
-| Disabled | 100 | 36611.528644 | 0.234482 | 28714.766667 | 0.209812 | Moderate / Moderate |
-| Disabled | 500 | 147143.976597 | 0.025741 | 8900.200000 | 0.048309 | Stable / Stable |
-| Disabled | 1000 | 47091.368160 | 0.739197 | 226996.700000 | 0.321273 | Unstable / Unstable |
-| GlobalMutex | 100 | 27764.705092 | 0.922663 | 27128.833333 | 0.213708 | Unstable / Moderate |
-| GlobalMutex | 500 | 31921.851325 | 0.115517 | 132980.733333 | 0.039584 | Moderate / Stable |
-| GlobalMutex | 1000 | 32038.433293 | 0.061356 | 260195.233333 | 0.032253 | Stable / Stable |
-| Sharded | 100 | 43980.181617 | 0.697623 | 22872.366667 | 0.378049 | Unstable / Unstable |
-| Sharded | 500 | 35647.156977 | 0.615147 | 127441.100000 | 0.181130 | Unstable / Moderate |
-| Sharded | 1000 | 31895.775837 | 0.045936 | 255582.500000 | 0.039344 | Stable / Stable |
-| ThreadLocal | 100 | 36859.122201 | 0.976070 | 25817.466667 | 0.343201 | Unstable / Unstable |
-| ThreadLocal | 500 | 148949.743028 | 0.008433 | 8586.666667 | 0.015320 | Stable / Stable |
-| ThreadLocal | 1000 | 28567.854655 | 0.079255 | 269401.000000 | 0.045880 | Stable / Stable |
+### Variability dropped by roughly an order of magnitude
 
-## Key Observations From v5
+Relative 95% bootstrap CI width on throughput (CI width ÷ median):
 
-- At `500` clients, `ThreadLocal` is best on both means: `148949.743028 ops/sec` throughput and `8586.666667 us` p99.
-- At `1000` clients, `Disabled` has the highest mean throughput (`47091.368160`), but this configuration is explicitly labeled unstable (high CV and outlier-heavy distribution).
-- `GlobalMutex` and `Sharded` at `1000` clients are slower than `Disabled` but statistically much steadier (throughput CV near `0.05-0.06`).
-- At `100` clients, all enabled telemetry strategies show unstable throughput due to large outliers.
-- Reported critical anomaly checks:
-  - `ThreadLocal p99 < Disabled p99` is confirmed at `100` and `500` clients.
-  - `ThreadLocal p99 < Disabled p99` is not confirmed at `1000` clients.
+| | v12 (flawed design) | RMIT laptop | RMIT Azure D4s_v6 | RMIT Azure D8s_v6 (advanced) |
+|---|---:|---:|---:|---:|
+| Mean | 0.176 (as CV) | 0.0129 | 0.0091 | 0.0177 |
+| Max | 0.698 (as CV) | 0.0386 | 0.0175 | 0.0420 |
 
-## Experiment Integrity (as reported)
+(v12's column is CV = stddev/mean, not CI width — not the identical statistic, but both
+measure spread relative to center, and the gap is large enough for the comparison to be
+meaningful regardless.)
 
-From [reports/final_experiment_v5.md](reports/final_experiment_v5.md), Section 6:
+### Instrumentation overhead: small, consistent, never above 2.3%
 
-- Baseline avg CV: throughput `0.383538`, p99 `0.852380`
-- Current avg CV: throughput `0.376785`, p99 `0.155655`
-- Baseline avg relative CI width: throughput `0.212622`, p99 `0.472536`
-- Current avg relative CI width: throughput `0.208879`, p99 `0.086291`
-- Increasing requests improved stability and tightened CIs: `YES`
-- Are results now reliable?: `NO`
+Mean throughput overhead vs. `disabled`, paired within the same RMIT repetition block
+(the valid RMIT comparison — every strategy in a block saw the same machine-state
+conditions):
 
-Note: the report's CI line states `mean +/- (1.96 * stddev / sqrt(50))` even though sample size is `30`; this README keeps values exactly as reported.
+| Strategy | Laptop | Azure D4s_v6 | Azure D8s_v6 (advanced) |
+|---|---:|---:|---:|
+| ThreadLocal | 0.99% | 0.56% | 0.52% |
+| Sharded-2key | 1.15% | 0.85% | 0.94% |
+| GlobalMutex | 1.36% | 0.99% | 1.64% |
+| HdrHistogram | 2.14% | 1.42% | 1.53% |
+| Sharded-N | 1.97% | 1.60% | 1.98% |
 
-## Quick Start
+`ThreadLocal` is the cheapest strategy on every machine; `Sharded-N` and `HdrHistogram`
+are consistently the most expensive. No strategy ever exceeds ~2.3% overhead at any
+concurrency level tested (100–3000), and the ranking never crosses over in a way that
+holds up against measurement noise (see below).
+
+### Workload type doesn't change which strategy is cheapest
+
+The advanced dataset adds read-heavy (80/20) and write-heavy (20/80) workloads
+alongside the standard 50/50 mixed workload. Overhead ranking is **identical** across
+all three:
+
+| Strategy | Mixed | Read-heavy | Write-heavy |
+|---|---:|---:|---:|
+| ThreadLocal | 0.44% | 0.46% | 0.64% |
+| Sharded-2key | 1.11% | 0.87% | 0.83% |
+| HdrHistogram | 1.45% | 1.78% | 1.36% |
+| GlobalMutex | 1.74% | 1.40% | 1.79% |
+| Sharded-N | 1.73% | 2.15% | 2.07% |
+
+### Graceful saturation, no cliff
+
+On the advanced (D8s_v6, up to 3000 clients) dataset, the `disabled` baseline (mixed
+workload) degrades smoothly rather than collapsing:
+
+| Concurrency | Throughput (median) | p99 latency (median) |
+|---:|---:|---:|
+| 100 | ~280,000 ops/sec | 0.8 ms |
+| 3000 | ~235,000 ops/sec | 85.5 ms |
+
+That's a ~16% throughput decline against a 30× increase in concurrent clients — the
+server is saturating gracefully, not falling over.
+
+### On the "crossovers"
+
+`analyze_rmit_results.py` also detects when the strategy with the highest median
+throughput changes across concurrency levels. It found 6 such "crossovers" in the
+advanced dataset — but since every strategy sits within ~2.3% of `disabled` at every
+concurrency level, a leader change driven by sub-2% differences is exactly what
+measurement noise looks like, not a real strategy-concurrency interaction. We report the
+number because the tooling can now detect a genuine crossover if one exists, but the
+honest reading of this dataset is: no meaningful crossover, overhead is flat and small
+throughout.
+
+### A methodological pitfall worth knowing
+
+The first attempt at the advanced dataset silently reported exactly `0 ops/sec` for
+every run above ~1000 concurrent clients — no crash, no error, a validly-formed result.
+Cause: the default open-file-descriptor limit (1024) on a fresh VM was far below the
+concurrency being tested, so every client connection failed silently. Fixed in
+`benchmarks/run_rmit_experiment.py` (`raise_fd_limit()`); see
+[docs/paper_draft.md](docs/paper_draft.md) §3 for the full story.
+
+### Caveats
+
+- The laptop run had an active development session sharing its 4 threads throughout
+  (see `experiment_results_rmit/metadata_rmit.json`); the Azure runs don't have this
+  confound and should be treated as primary where they disagree (in practice they agree
+  closely).
+- Client and server always share the same machine — at the highest concurrency levels
+  this is a genuine thread-oversubscription stress test, not an isolated server
+  measurement.
+- Only x86-64 hardware tested (4–8 vCPUs/threads); no claim about other architectures or
+  core counts.
+
+Full detail, methodology, and remaining open items: **[docs/paper_draft.md](docs/paper_draft.md)**.
+
+## Quick start
 
 ### 1. Build
 
@@ -114,76 +158,76 @@ cargo build --release --bin server
 cargo build --release --manifest-path benchmarks/Cargo.toml
 ```
 
-### 2. Start server
-
-```bash
-RUSTREDIS_METRICS_STRATEGY=sharded cargo run --release --bin server
-```
-
-### 3. Run benchmark (new run)
-
-```bash
-cargo run --release --manifest-path benchmarks/Cargo.toml -- \
-  --host 127.0.0.1 \
-  --port 6379 \
-  --concurrency 100,500,1000 \
-  --requests 1000 \
-  --runs 30 \
-  --workload mixed \
-  --key-space 10000 \
-  --value-size 64 \
-  --output-dir results/manual_v5_like
-```
-
-### 4. Run the current RMIT experiment (this laptop)
+### 2. Run the RMIT experiment
 
 ```bash
 python3 benchmarks/run_rmit_experiment.py --output-dir experiment_results_rmit
 python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit/raw_data_rmit.csv
 ```
 
-See [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md) before
-running this — it has a manual machine-control checklist (power, sleep,
-background processes) that materially affects result quality.
+Read [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md) first — it has
+a manual machine-control checklist (power, sleep, background processes) that materially
+affects result quality, plus the cloud-VM path (`--workloads mixed,read-heavy,write-heavy`
+for the 3-D design used in the advanced dataset above).
 
-### 5. Legacy automation scripts (v5/v12, fixed-order runner, superseded)
+### 3. Start a server manually / run a one-off benchmark
 
-- [benchmarks/run_final_matrix.sh](benchmarks/run_final_matrix.sh)
-- [benchmarks/run_macos_m2_research.sh](benchmarks/run_macos_m2_research.sh)
-- [benchmarks/run_paper_final_experiment.sh](benchmarks/run_paper_final_experiment.sh)
-- [benchmarks/run_final_experiment_v12.py](benchmarks/run_final_experiment_v12.py)
+```bash
+RUSTREDIS_METRICS_STRATEGY=sharded_n cargo run --release --bin server
+```
 
-## Data and Reports
+```bash
+cargo run --release --manifest-path benchmarks/Cargo.toml -- \
+  --host 127.0.0.1 --port 6379 \
+  --concurrency 100,500,1000 --requests 1000 --runs 30 \
+  --workload mixed --key-space 10000 --value-size 64 \
+  --output-dir results/manual_run
+```
 
-- Reports index: [reports/README.md](reports/README.md)
-- Canonical v5 full report: [reports/final_experiment_v5.md](reports/final_experiment_v5.md)
-- Additional reports:
-  - [reports/final_experiment_report_enhanced.md](reports/final_experiment_report_enhanced.md)
-  - [reports/final_experiment_report.md](reports/final_experiment_report.md)
-  - [reports/final_experiment_details.md](reports/final_experiment_details.md)
+## Documentation
+
+- [docs/paper_draft.md](docs/paper_draft.md): full write-up with all three RMIT datasets
+- [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md): current experiment protocol (laptop + cloud-VM paths)
+- [docs/system-design.md](docs/system-design.md)
+- [docs/failure-analysis.md](docs/failure-analysis.md)
+- [repo_structure.md](repo_structure.md): compact repository map
+- [docs/macos_m2_experiment_protocol.md](docs/macos_m2_experiment_protocol.md): superseded, kept for provenance (M2 hardware)
+- [docs/legacy_docs_archive.md](docs/legacy_docs_archive.md)
+
+## Legacy: v5/v12 (superseded fixed-order design)
+
+Kept for provenance and as the "before" side of the before/after comparison above — not
+the current canonical result. v5 ran on Apple M2 hardware with only 4 of the current 6
+strategies (`Sharded-2key`, `Sharded-N`, and `HdrHistogram` were added later).
+
+| Strategy | Clients | Throughput Mean (ops/sec) | Throughput CV | p99 Mean (us) |
+|---|---:|---:|---:|---:|
+| Disabled | 100 | 36,612 | 0.234 | 28,715 |
+| Disabled | 500 | 147,144 | 0.026 | 8,900 |
+| Disabled | 1000 | 47,091 | 0.739 | 226,997 |
+| GlobalMutex | 1000 | 32,038 | 0.061 | 260,195 |
+| Sharded | 1000 | 31,896 | 0.046 | 255,583 |
+| ThreadLocal | 500 | 148,950 | 0.008 | 8,587 |
+| ThreadLocal | 1000 | 28,568 | 0.079 | 269,401 |
+
+v12 (30 repetitions, fixed order, Apple M2) mean throughput CV across 48 configurations:
+**0.176**, max **0.698** — see [docs/paper_draft.md](docs/paper_draft.md) §2 for the full
+evidence this instability was a benchmark-design artifact, not a server property.
+
+- Full v5 report: [reports/final_experiment_v5.md](reports/final_experiment_v5.md)
+- Additional reports: [reports/final_experiment_report_enhanced.md](reports/final_experiment_report_enhanced.md), [reports/final_experiment_report.md](reports/final_experiment_report.md), [reports/final_experiment_details.md](reports/final_experiment_details.md)
+- v12 dataset: [experiment_results_v12](experiment_results_v12)
 - Canonical figures: [figures/canonical](figures/canonical)
-- Compact repository map: [repo_structure.md](repo_structure.md)
-- Raw benchmark trees (legacy, pre-RMIT):
-  - [results/final_experiment](results/final_experiment)
-  - [results/final_matrix](results/final_matrix)
-  - [results/macos_m2](results/macos_m2)
-  - [results/metrics_strategy_mandatory](results/metrics_strategy_mandatory)
-  - [results/system_validation_v15](results/system_validation_v15)
-- Current (RMIT) datasets:
-  - [experiment_results_rmit](experiment_results_rmit) — laptop run
-  - [experiment_results_rmit_azure](experiment_results_rmit_azure) — cloud VM run (D4s_v6, mixed workload)
-  - [experiment_results_rmit_advanced](experiment_results_rmit_advanced) — cloud VM run (D8s_v6, 3 workload types, concurrency up to 3000)
-  - [docs/paper_draft.md](docs/paper_draft.md) — write-up with all three datasets' results
+- Legacy raw benchmark trees (pre-v12): [results/final_experiment](results/final_experiment), [results/final_matrix](results/final_matrix), [results/macos_m2](results/macos_m2), [results/metrics_strategy_mandatory](results/metrics_strategy_mandatory), [results/system_validation_v15](results/system_validation_v15)
+- Legacy automation scripts (fixed-order runner, superseded): [benchmarks/run_final_matrix.sh](benchmarks/run_final_matrix.sh), [benchmarks/run_macos_m2_research.sh](benchmarks/run_macos_m2_research.sh), [benchmarks/run_paper_final_experiment.sh](benchmarks/run_paper_final_experiment.sh), [benchmarks/run_final_experiment_v12.py](benchmarks/run_final_experiment_v12.py)
 
-## Architecture Overview
-
-High-level server pipeline:
+## Architecture overview
 
 1. TCP listener accepts client connections.
 2. Tokio task per connection parses RESP frames.
 3. Command executor operates on shared DB state.
 4. Optional persistence appends to AOF.
-5. Telemetry path updates command metrics according to selected strategy.
+5. Telemetry path updates command metrics according to the selected strategy.
 
 Core modules:
 
@@ -197,15 +241,6 @@ Core modules:
 - [src/command_metrics.rs](src/command_metrics.rs): metrics strategies
 - [src/metrics.rs](src/metrics.rs): process/system counters
 - [src/pubsub.rs](src/pubsub.rs): pub/sub manager
-
-## Docs
-
-- [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md): current experiment protocol (i3 laptop, RMIT design)
-- [docs/README.md](docs/README.md)
-- [docs/system-design.md](docs/system-design.md)
-- [docs/failure-analysis.md](docs/failure-analysis.md)
-- [docs/macos_m2_experiment_protocol.md](docs/macos_m2_experiment_protocol.md): superseded, kept for provenance (M2 hardware)
-- [docs/legacy_docs_archive.md](docs/legacy_docs_archive.md)
 
 ## License
 
