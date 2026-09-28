@@ -15,8 +15,9 @@ environments by
 invented by this project — on three machines: a Linux laptop and two dedicated Azure
 VMs (4,320 runs, 240 configurations, 25–3000 concurrent clients, three workload mixes).
 No two-state throughput pattern appears (0 of 240 configurations flagged) and run-to-run
-variability is low. Every strategy costs a small, consistent overhead — **at most ~2.3%**
-at any tested concurrency — with ThreadLocal cheapest and Sharded-2key second on all
+variability is low. Every strategy costs a small, consistent overhead — **at most ~2.6%**
+at any concurrency of 50 or more clients (workload-averaged; the laptop's noisier
+25-client cells reach 4.3%) — with ThreadLocal cheapest and Sharded-2key second on all
 three machines; the order of the other three varies by machine, and the design resolves
 differences of roughly 1–2%, so smaller gaps are unresolved rather than absent.
 
@@ -67,7 +68,7 @@ Relative 95% bootstrap CI width on throughput (CI width ÷ median):
 | Mean | 0.0129 | 0.0091 | 0.0177 |
 | Max | 0.0386 | 0.0175 | 0.0420 |
 
-### Instrumentation overhead: small, consistent, at most ~2.3%
+### Instrumentation overhead: small and consistent, at most ~2.6% from 50 clients up
 
 Mean throughput overhead vs. `disabled`, paired within the same RMIT repetition block
 (the valid RMIT comparison — every strategy in a block saw the same machine-state
@@ -84,9 +85,10 @@ conditions):
 `ThreadLocal` is the cheapest strategy and `Sharded-2key` the second-cheapest on every
 machine; the order of the other three (`GlobalMutex`, `HdrHistogram`, `Sharded-N`)
 changes from machine to machine and is not claimed to be resolved (see the paper's §4b
-and §7). No strategy ever exceeds ~2.3% overhead at any concurrency level tested
-(100–3000), and the ranking never crosses over in a way that holds up against
-measurement noise (see below).
+and §7). No strategy exceeds ~2.6% overhead at any concurrency level of 50 or more
+(workload-averaged; single concurrency-by-workload cells reach 3.2%, and the laptop's
+25-client cells reach 4.3%), and the ranking never crosses over in a way that holds up
+against measurement noise (see below).
 
 ### Workload type doesn't change which strategy is cheapest
 
@@ -123,7 +125,7 @@ server is saturating gracefully, not falling over.
 `analyze_rmit_results.py` also detects when the strategy with the highest median
 throughput changes across concurrency levels. It found 6 such "crossovers" in the
 advanced dataset — but since every strategy sits within ~2.3% of `disabled` at every
-concurrency level, a leader change driven by sub-2% differences is exactly what
+concurrency level (workload-averaged), a leader change driven by sub-2% differences is exactly what
 measurement noise looks like, not a real strategy-concurrency interaction. We report the
 number because the tooling can now detect a genuine crossover if one exists, but the
 honest reading of this dataset is: no meaningful crossover, overhead is flat and small
