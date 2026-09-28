@@ -141,28 +141,29 @@ def summarize_config(rows: List[Dict[str, str]], rng: random.Random, args: argpa
 def paired_ratio_comparisons(
     rows: List[Dict[str, str]],
     baseline_strategy: str,
-) -> Dict[Tuple[str, int], Dict[str, object]]:
-    """For every (strategy, concurrency), compute the ratio of that strategy's
-    throughput to `baseline_strategy`'s throughput within the SAME block —
-    the pairing that controls for whatever time-varying machine state RMIT
-    is designed to average out."""
-    by_block_conc_strategy: Dict[Tuple[int, int], Dict[str, float]] = defaultdict(dict)
+) -> Dict[Tuple[str, int, str], Dict[str, object]]:
+    """For every (strategy, concurrency, workload), compute the ratio of that
+    strategy's throughput to `baseline_strategy`'s throughput within the SAME
+    block — the pairing that controls for whatever time-varying machine
+    state RMIT is designed to average out."""
+    by_block_conc_wl: Dict[Tuple[int, int, str], Dict[str, float]] = defaultdict(dict)
     for r in rows:
         block = int(r["block_id"])
         conc = int(r["concurrency"])
-        by_block_conc_strategy[(block, conc)][r["strategy"]] = float(r["throughput"])
+        wl = r.get("workload", "mixed")
+        by_block_conc_wl[(block, conc, wl)][r["strategy"]] = float(r["throughput"])
 
-    ratios: Dict[Tuple[str, int], List[float]] = defaultdict(list)
-    for (block, conc), strategy_map in by_block_conc_strategy.items():
+    ratios: Dict[Tuple[str, int, str], List[float]] = defaultdict(list)
+    for (block, conc, wl), strategy_map in by_block_conc_wl.items():
         baseline_val = strategy_map.get(baseline_strategy)
         if baseline_val is None or baseline_val <= 0:
             continue
         for strategy, val in strategy_map.items():
             if strategy == baseline_strategy:
                 continue
-            ratios[(strategy, conc)].append(val / baseline_val)
+            ratios[(strategy, conc, wl)].append(val / baseline_val)
 
-    result: Dict[Tuple[str, int], Dict[str, object]] = {}
+    result: Dict[Tuple[str, int, str], Dict[str, object]] = {}
     for key, values in ratios.items():
         result[key] = {
             "n_paired_blocks": len(values),
@@ -170,6 +171,47 @@ def paired_ratio_comparisons(
             "ratio_mean": statistics.mean(values) if values else None,
         }
     return result
+
+
+def detect_ranking_crossovers(
+    per_config_summary: List[Dict[str, object]],
+) -> Dict[str, object]:
+    """For each workload, walk concurrency levels in order and track which
+    strategy has the highest median throughput. A crossover is any point
+    where the leader changes — this is the signal that would justify
+    picking a different strategy at different concurrency levels, which a
+    single flat "overhead is X%" number would hide."""
+    by_workload: Dict[str, Dict[int, List[Tuple[str, float]]]] = defaultdict(lambda: defaultdict(list))
+    for s in per_config_summary:
+        wl = s.get("workload", "mixed")
+        by_workload[wl][s["concurrency"]].append((s["strategy"], s["throughput_median"]))
+
+    report: Dict[str, object] = {}
+    for wl, by_conc in by_workload.items():
+        leaders: List[Tuple[int, str, float]] = []
+        for conc in sorted(by_conc):
+            strategy, median = max(by_conc[conc], key=lambda t: t[1])
+            leaders.append((conc, strategy, median))
+
+        crossovers = []
+        for i in range(1, len(leaders)):
+            prev_conc, prev_leader, _ = leaders[i - 1]
+            conc, leader, _ = leaders[i]
+            if leader != prev_leader:
+                crossovers.append({
+                    "from_concurrency": prev_conc,
+                    "to_concurrency": conc,
+                    "leader_before": prev_leader,
+                    "leader_after": leader,
+                })
+
+        report[wl] = {
+            "leader_by_concurrency": [
+                {"concurrency": c, "leading_strategy": s, "throughput_median": m} for c, s, m in leaders
+            ],
+            "crossovers": crossovers,
+        }
+    return report
 
 
 def main() -> None:
@@ -183,15 +225,16 @@ def main() -> None:
 
     rng = random.Random(args.seed)
 
-    grouped: Dict[Tuple[str, int], List[Dict[str, str]]] = defaultdict(list)
+    grouped: Dict[Tuple[str, int, str], List[Dict[str, str]]] = defaultdict(list)
     for r in rows:
-        grouped[(r["strategy"], int(r["concurrency"]))].append(r)
+        grouped[(r["strategy"], int(r["concurrency"]), r.get("workload", "mixed"))].append(r)
 
     per_config_summary = []
-    for (strategy, concurrency), cfg_rows in sorted(grouped.items()):
+    for (strategy, concurrency, workload), cfg_rows in sorted(grouped.items()):
         summary = summarize_config(cfg_rows, rng, args)
         summary["strategy"] = strategy
         summary["concurrency"] = concurrency
+        summary["workload"] = workload
         per_config_summary.append(summary)
 
     two_state_configs = [s for s in per_config_summary if s["two_state"].get("bimodal")]
@@ -201,20 +244,24 @@ def main() -> None:
         baseline = sorted({r["strategy"] for r in rows})[0]
     ratios = paired_ratio_comparisons(rows, baseline_strategy=baseline)
 
+    crossovers = detect_ranking_crossovers(per_config_summary)
+    total_crossovers = sum(len(v["crossovers"]) for v in crossovers.values())
+
     report = {
         "input_file": str(input_path),
         "n_raw_rows": len(rows),
         "n_configs": len(per_config_summary),
         "n_configs_flagged_two_state": len(two_state_configs),
         "two_state_config_keys": [
-            {"strategy": s["strategy"], "concurrency": s["concurrency"], **s["two_state"]}
+            {"strategy": s["strategy"], "concurrency": s["concurrency"], "workload": s["workload"], **s["two_state"]}
             for s in two_state_configs
         ],
         "per_config_summary": per_config_summary,
         "paired_ratio_baseline": baseline,
         "paired_ratio_vs_baseline": [
-            {"strategy": k[0], "concurrency": k[1], **v} for k, v in sorted(ratios.items())
+            {"strategy": k[0], "concurrency": k[1], "workload": k[2], **v} for k, v in sorted(ratios.items())
         ],
+        "ranking_crossovers_by_workload": crossovers,
     }
 
     out_json = output_dir / "rmit_analysis.json"
@@ -225,7 +272,7 @@ def main() -> None:
         writer = csv.DictWriter(
             fh,
             fieldnames=[
-                "strategy", "concurrency", "n", "throughput_median", "throughput_ci_low",
+                "strategy", "concurrency", "workload", "n", "throughput_median", "throughput_ci_low",
                 "throughput_ci_high", "p99_median", "p99_ci_low", "p99_ci_high", "two_state_bimodal",
             ],
         )
@@ -234,6 +281,7 @@ def main() -> None:
             writer.writerow({
                 "strategy": s["strategy"],
                 "concurrency": s["concurrency"],
+                "workload": s["workload"],
                 "n": s["n"],
                 "throughput_median": s["throughput_median"],
                 "throughput_ci_low": s["throughput_ci_low"],
@@ -249,11 +297,17 @@ def main() -> None:
     for s in two_state_configs:
         ts = s["two_state"]
         print(
-            f"  {s['strategy']}/c{s['concurrency']}: "
+            f"  {s['strategy']}/c{s['concurrency']}/{s['workload']}: "
             f"low={ts['state_low_median']:.0f} ops/s (n={ts['state_low_n']}) vs "
             f"high={ts['state_high_median']:.0f} ops/s (n={ts['state_high_n']}), "
             f"ratio={ts['ratio_high_over_low']:.2f}x"
         )
+    print(f"\nRanking crossovers (strategy with highest median throughput changes "
+          f"as concurrency increases): {total_crossovers} total")
+    for wl, info in crossovers.items():
+        for c in info["crossovers"]:
+            print(f"  [{wl}] c={c['from_concurrency']}->{c['to_concurrency']}: "
+                  f"{c['leader_before']} -> {c['leader_after']}")
     print(f"\nWritten: {out_json}")
     print(f"Written: {out_csv}")
 
