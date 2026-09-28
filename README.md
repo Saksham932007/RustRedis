@@ -32,7 +32,7 @@ not as the current canonical result.
 
 | Parameter | Value |
 |---|---|
-| Run directory | `results/final_experiment_v5/20260418_200904` |
+| Run directory | `results/final_experiment_v5/20260418_200904` (not present in this repo — the raw v5 run tree was never committed; the report and table below are the surviving record) |
 | Timestamp | `2026-04-18T20:09:04+05:30` |
 | Host | `redacted-host` |
 | CPU | `Apple M2` |
@@ -163,10 +163,16 @@ background processes) that materially affects result quality.
   - [reports/final_experiment_details.md](reports/final_experiment_details.md)
 - Canonical figures: [figures/canonical](figures/canonical)
 - Compact repository map: [repo_structure.md](repo_structure.md)
-- Raw benchmark trees:
-  - [results/final_experiment_v5](results/final_experiment_v5)
+- Raw benchmark trees (legacy, pre-RMIT):
   - [results/final_experiment](results/final_experiment)
   - [results/final_matrix](results/final_matrix)
+  - [results/macos_m2](results/macos_m2)
+  - [results/metrics_strategy_mandatory](results/metrics_strategy_mandatory)
+  - [results/system_validation_v15](results/system_validation_v15)
+- Current (RMIT) datasets:
+  - [experiment_results_rmit](experiment_results_rmit) — laptop run
+  - [experiment_results_rmit_azure](experiment_results_rmit_azure) — cloud VM run
+  - [docs/paper_draft.md](docs/paper_draft.md) — write-up with both datasets' results
 
 ## Architecture Overview
 

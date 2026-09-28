@@ -65,7 +65,7 @@ Configuration Type: hardcoded (DashMap library default; not user-configured)
 - However, DashMap still performs shard-level locking on the **write path** (`entry().and_modify().or_insert()`), which acquires an exclusive write lock per shard — if two commands hash to the same shard, contention occurs
 - The key space is small (only unique command-name strings: `GET`, `SET`, etc.), so all operations on the same command name **always** contend on the same shard regardless of shard count
 
-> **Source:** [command_metrics.rs L165–L190](file://<repo-root>/src/command_metrics.rs#L165-L190) — `ShardedCollector` uses `DashMap::new()` with no custom shard count.
+> **Source:** [command_metrics.rs L165–L190](../src/command_metrics.rs#L165-L190) — `ShardedCollector` uses `DashMap::new()` with no custom shard count.
 
 ---
 
@@ -82,12 +82,12 @@ Flush Frequency:
 
 **Mechanism details:**
 
-1. **Hot path** ([command_metrics.rs L221–L236](file://<repo-root>/src/command_metrics.rs#L221-L236)):
+1. **Hot path** ([command_metrics.rs L221–L236](../src/command_metrics.rs#L221-L236)):
    - Each call to `record()` writes to `thread_local!` storage — **zero synchronization**
    - A global `AtomicU64` counter (`records_since_flush`) is incremented with `Relaxed` ordering
    - When `count % 1000 == 999`, the current thread's local batch is drained into `pending_batches: Mutex<Vec<HashMap>>`
 
-2. **Background flush** ([command_metrics.rs L430–L438](file://<repo-root>/src/command_metrics.rs#L430-L438)):
+2. **Background flush** ([command_metrics.rs L430–L438](../src/command_metrics.rs#L430-L438)):
    - A dedicated Tokio task runs `flush()` every 100 ms
    - `flush()` drains all pending batches and merges them into `global_snapshot: Mutex<HashMap>`
    - Resets `records_since_flush` to 0
@@ -100,7 +100,7 @@ Flush Frequency:
 | Batching           | Thread-local batches accumulate up to 1000 records before being pushed. This means CMDSTAT reads may be stale by up to 1000 records + 100 ms. |
 | Scheduling         | The 100 ms background flush task runs on the Tokio runtime, consuming a small amount of scheduler time. On an 8-thread runtime, this is negligible. |
 
-> **Source:** [command_metrics.rs L196–L287](file://<repo-root>/src/command_metrics.rs#L196-L287) and [server.rs L44–L48](file://<repo-root>/src/bin/server.rs#L44-L48).
+> **Source:** [command_metrics.rs L196–L287](../src/command_metrics.rs#L196-L287) and [server.rs L44–L48](../src/bin/server.rs#L44-L48).
 
 ---
 
@@ -126,7 +126,7 @@ The benchmark client (`benchmarks/src/main.rs`) is compiled as a separate binary
 Concurrency Model: OS threads (std::thread::spawn)
 ```
 
-Each "client" is an OS thread ([benchmarks/src/main.rs L339](file://<repo-root>/benchmarks/src/main.rs#L339)) using **synchronous, blocking TCP I/O** via `std::net::TcpStream`. Each thread:
+Each "client" is an OS thread ([benchmarks/src/main.rs L339](../benchmarks/src/main.rs#L339)) using **synchronous, blocking TCP I/O** via `std::net::TcpStream`. Each thread:
 - Opens its own TCP connection
 - Sets `TCP_NODELAY = true`
 - Sets 5-second read/write timeouts
@@ -145,13 +145,13 @@ Distribution: requests_per_client = total_requests / concurrency
 | 500         | 20              | 10,000         |
 | 1000        | 10              | 10,000         |
 
-**Throughput computation** ([benchmarks/src/main.rs L400](file://<repo-root>/benchmarks/src/main.rs#L400)):
+**Throughput computation** ([benchmarks/src/main.rs L400](../benchmarks/src/main.rs#L400)):
 
 ```
 ops_per_sec = total_successful_ops / wall_clock_duration_secs
 ```
 
-**Latency measurement** ([benchmarks/src/main.rs L354–L360](file://<repo-root>/benchmarks/src/main.rs#L354-L360)):
+**Latency measurement** ([benchmarks/src/main.rs L354–L360](../benchmarks/src/main.rs#L354-L360)):
 - Per-operation `Instant::now()` → `elapsed().as_micros()` timestamps
 - Collected per-thread, merged post-join into a single sorted vector
 - Percentiles computed via index-based lookup: `idx = (p/100) × (n-1)`
@@ -164,7 +164,7 @@ ops_per_sec = total_successful_ops / wall_clock_duration_secs
 | Scheduling Interference | **Present.** macOS kernel schedules both benchmark threads and server Tokio workers on the same CPU. No CPU pinning or isolation. P/E core asymmetry (4P+4E on M2) adds scheduling non-determinism. |
 | Measurement Bias       | **Moderate.** Same-machine benchmarking inflates latency due to CPU contention but eliminates network variability. Results reflect a **worst-case co-located** scenario, not a client-server deployment. |
 
-> **Source:** [benchmarks/src/main.rs L310–L409](file://<repo-root>/benchmarks/src/main.rs#L310-L409) and [run_paper_final_experiment.sh L206–L242](file://<repo-root>/benchmarks/run_paper_final_experiment.sh#L206-L242).
+> **Source:** [benchmarks/src/main.rs L310–L409](../benchmarks/src/main.rs#L310-L409) and [run_paper_final_experiment.sh L206–L242](../benchmarks/run_paper_final_experiment.sh#L206-L242).
 
 ---
 
