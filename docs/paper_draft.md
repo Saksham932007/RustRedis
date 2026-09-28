@@ -20,8 +20,11 @@ every table value in §4/§4b exactly before being trusted. §5's
 hardware-hypothesis script (`benchmarks/hardware_hypothesis_check.sh`) is
 only worth running if a laptop-side thermal/scheduling explanation is
 still wanted for completeness — the cloud VM results already show the
-original instability was never a server property to begin with. Target
-length: 4-6 pages.*
+original instability was never a server property to begin with. Known
+remaining work: §1 is written as an annotated bibliography and must be
+condensed to a normal related-work section (the full draft is far beyond
+the original 4-6 page target); page ranges in References need a final
+check; Laaber et al. (2019) needs a full read (see §7).*
 
 ## Abstract
 
@@ -33,9 +36,9 @@ unexplained bimodal fast/slow pattern at several concurrency levels. We
 show this instability was an artifact of the benchmark's run ordering
 being confounded with time-varying machine and process state, not a
 property of the server. Redesigning the experiment around Randomized
-Multiple Interleaved Trials (RMIT) — a technique defined by Abedi and
-Brecht (2017) for exactly this class of problem, applied here to a new
-domain (§1) — with per-run machine-state logging, and rerunning the full
+Multiple Interleaved Trials (RMIT) — a technique proposed by Abedi,
+Heard, and Brecht (2015) and studied for cloud environments by Abedi and
+Brecht (2017), applied here to a new domain (§1) — with per-run machine-state logging, and rerunning the full
 matrix on two independent machines (a 4-thread laptop and a dedicated
 4-vCPU cloud VM), eliminates the bimodal pattern entirely
 (0 of 48 configurations flagged as two-state on either machine) and
@@ -49,7 +52,7 @@ design to three workload types (mixed, read-heavy, write-heavy) and
 concurrency up to 3000 clients on an 8-vCPU cloud VM: the "no bimodal
 states" and "small consistent overhead" findings both hold across the
 full 144-configuration matrix (still 0 flagged two-state), overhead stays
-under 2.2% at every concurrency level from 100 to 3000, and the top and
+at or below 2.31% at every concurrency level from 100 to 3000, and the top and
 bottom of the per-strategy ranking (thread_local cheapest, sharded_n
 tied-or-most expensive) hold across all three workload types — the choice
 of instrumentation strategy does not meaningfully interact with
@@ -63,16 +66,16 @@ already apply RMIT with bootstrap confidence intervals to cloud
 benchmarking — this paper's contribution is specifically:
 
 1. **A live-server empirical result in a regime existing RMIT studies
-   don't cover.** Both Abedi and Brecht (2017) and Laaber et al. (2019)
-   apply RMIT to isolated units — cloud infrastructure micro-traces and
-   single-method JMH/Go microbenchmarks, respectively — run without real
+   don't cover.** Abedi and Brecht (2017) and Laaber et al. (2019) apply
+   RMIT to isolated units — replayed EC2 benchmark traces and
+   single-method JMH/Go microbenchmarks, respectively — with no real
    concurrent client load. This paper applies the same rigor to a full
    network client-server system under concurrent load up to 3000 clients
    against 4-8 vCPUs (a thread-oversubscription regime with connection
    setup, server restarts, and OS scheduler interaction that
    method-level microbenchmarks don't exercise), replicated across three
    independently-provisioned machines, to measure something no prior
-   RMIT study reports: the throughput/latency cost of six specific
+   RMIT study we found reports: the throughput/latency cost of six specific
    command-metrics instrumentation strategies in an in-memory
    Redis-compatible key-value store (§4, §4b).
 2. **A documented "clean but wrong" failure mode that RMIT's own
@@ -126,23 +129,28 @@ exists, and one paper in particular already does most of what this
 paper's §3 presents as a "fix."** This needs to be stated plainly rather
 than glossed over:
 
-- **Abedi, A. and Brecht, T. (2017). "Conducting Repeatable Experiments
-  in Highly Variable Cloud Computing Environments." ICPE '17.** This
-  paper defines and names **Randomized Multiple Interleaved Trials
-  (RMIT)** — interleaving randomly-ordered trials of the configurations
-  under comparison so that time-varying environmental conditions land on
-  every configuration roughly equally, rather than confounding with one
-  of them — as a specific improvement over single-trial and
-  multiple-*consecutive*-trial designs for cloud performance comparisons.
+- **Abedi, A., Heard, C., and Brecht, T. (2015). "Conducting Repeatable
+  Experiments and Fair Comparisons using 802.11n MIMO Networks." ACM
+  SIGOPS Operating Systems Review, 49(1)** proposed **Randomized Multiple
+  Interleaved Trials (RMIT)** for WiFi experiments, and
+  **Abedi, A. and Brecht, T. (2017). "Conducting Repeatable Experiments
+  in Highly Variable Cloud Computing Environments." ICPE '17** showed it
+  is needed, not optional, in cloud environments. RMIT interleaves
+  randomly-ordered trials of the configurations under comparison (one
+  fresh random order per round) so that time-varying environmental
+  conditions land on every configuration roughly equally rather than
+  confounding with one of them; the 2017 paper demonstrates on
+  pre-collected EC2 benchmark traces that single-trial and
+  multiple-*consecutive*-trial designs falsely report differences of up to
+  37.8% between two identical systems, and that even non-randomized
+  interleaving (MIT) fails when the environment changes periodically.
   **This is the same technique, under the same name, that this paper's §3
-  presents.** This project arrived at randomized interleaving
-  independently (motivated by §2's own evidence of order-confounded
-  instability, before this literature was found), but the technique
-  itself, its name, and its core justification are Abedi and Brecht's
-  contribution, not this project's. What this paper adds on top of theirs
-  is scoped to §3-§7's specific application: applying RMIT to per-command
-  observability-strategy comparison in a Rust in-memory key-value store
-  (a different domain than their EC2 network/disk/CPU traces), the
+  presents; the technique, its name, and its core justification are
+  Abedi, Heard, and Brecht's contribution, not this project's.** What
+  this paper adds on top is scoped to §3-§7's specific application:
+  applying RMIT to live per-command observability-strategy comparison in
+  a Rust in-memory key-value store (their 2017 study ran no live
+  experiments — it replays traces collected by others), the
   file-descriptor exhaustion failure mode in §3 (a systematic,
   order-independent failure their design doesn't discuss), and the
   explicit minimum-detectable-effect analysis in §7 (their paper
@@ -162,11 +170,12 @@ than glossed over:
   this paper follows in §3, §4, and §7. The differences are the unit
   under test (fine-grained library microbenchmarks across many unrelated
   OSS projects vs. one server's own six instrumentation strategies under
-  realistic concurrent client load) and the tighter minimum detectable
-  effect this paper achieves (roughly 1-2%, §7) by using many
-  within-machine repetitions (15-30) of a single, cheap, fast-running
-  workload rather than comparing across many separately-provisioned
-  instances.
+  realistic concurrent client load) and the experimental unit: this
+  paper's minimum detectable effect (roughly 1-2%, §7) comes from 15-30
+  within-machine repetitions of one fast workload, whereas their ~10%
+  figure comes from cross-instance comparisons of benchmarks whose own
+  variability ranges from 0.03% to over 100% CV. The two numbers answer
+  different questions and are not a like-for-like comparison.
 - **Mytkowicz, T., Diwan, A., Hauswirth, M., and Sweeney, P. F. (2009).
   "Producing Wrong Data Without Doing Anything Obviously Wrong!" ASPLOS
   '09.** Documents that unrandomized, seemingly innocuous aspects of an
@@ -273,7 +282,7 @@ than glossed over:
   critique of the v12 design, though focused on cross-study comparability
   problems rather than the within-study run-order confound this paper
   addresses.
-- **Fan, B., Lim, H., Andersen, D. G., and Kaminsky, M. (2013). "MemC3:
+- **Fan, B., Andersen, D. G., and Kaminsky, M. (2013). "MemC3:
   Compact and Concurrent MemCache with Dumber Caching and Smarter
   Hashing." NSDI '13.** Replaces Memcached's global-lock-protected hash
   table with a concurrent, mostly-lock-free cuckoo hash table, achieving
@@ -339,10 +348,11 @@ unstable configuration — the design cannot tell the two apart.
 ## 3. The Fixed Design: RMIT
 
 Randomized Multiple Interleaved Trials (RMIT) — the technique applied in
-this section — is not new to this paper; it is defined and named by
-Abedi and Brecht (2017) as a fix for the same class of problem §2
-documents (see §1 for the full comparison to that paper and to Laaber et
-al. (2019), who apply the same technique with bootstrap confidence
+this section — is not new to this paper; it was proposed by Abedi, Heard,
+and Brecht (2015) and shown to be necessary in cloud environments by
+Abedi and Brecht (2017), as a fix for the same class of problem §2
+documents (see §1 for the full comparison to those papers and to Laaber
+et al. (2019), who apply the same technique with bootstrap confidence
 intervals to cloud microbenchmarking). This project's specific
 application:
 
@@ -427,7 +437,11 @@ of which exact variability statistic is used.)
 Paired within-repetition-block throughput ratios vs. the `disabled`
 baseline (the RMIT-valid comparison — it controls for whatever
 time-varying condition affected block N, since every strategy in block N
-saw the same condition):
+saw the same condition). For each (strategy, concurrency[, workload])
+cell, overhead is 1 − the *median* paired-block throughput ratio (medians
+are this project's primary point estimate throughout, per
+`benchmarks/analyze_rmit_results.py`); "mean overhead" in every table below
+is the arithmetic mean of those per-cell medians across cells:
 
 | Strategy | Laptop mean overhead | Cloud VM mean overhead |
 |---|---:|---:|
@@ -550,7 +564,7 @@ across the entire tested range.
 are.** It's worth being precise about which parts of "no significant
 difference" actually mean "we detected no difference" versus "any
 difference here is too small for this design to see" (see the
-minimum-detectable-effect numbers in §6). Ranking all six strategies by
+minimum-detectable-effect numbers in §7). Ranking all six strategies by
 mean overhead within each of the three independent datasets — laptop,
 Azure D4s_v6, and Azure D8s_v6 (§4's table and this section's workload
 table) — gives:
@@ -599,7 +613,7 @@ the rank-1/rank-2 finding replicates three times independently.
 The Azure results are themselves informative here: two dedicated, idle
 VMs with no thermal sensors and no battery produced the same "no bimodal
 states" outcome as the laptop across a combined 192 configurations
-(48 + 144), at up to 6x the original concurrency ceiling. This is
+(48 + 144), at up to 3x the original (v12) concurrency ceiling. This is
 consistent with the original v5/v12 instability being caused by
 **benchmark design (fixed run order) rather than any specific hardware
 condition** — thermal throttling, P/E-core scheduling, or memory pressure
@@ -622,7 +636,7 @@ Two audiences can act on this work directly.
 
 **For anyone choosing a metrics-collection strategy for a similar
 concurrent server:** the overhead of per-command observability here is
-small enough (under 2.3% at every concurrency level tested, on every
+small enough (at most 2.31% at every concurrency level tested, on every
 workload and every machine) that "does instrumentation cost too much" is
 not, by itself, a reason to leave it disabled in production for a system
 in this class (single-process, in-memory, network-bound). Within that
@@ -677,6 +691,13 @@ per-sample output by eye before trusting an aggregate.
   specific published YCSB-based throughput comparisons of Redis-class
   systems, which this pass did not individually survey beyond the
   methodology-level papers cited.
+- The "neither prior paper reports X" statements in the Contributions
+  section rest on a full read of Abedi and Brecht (2017) (six pages) but
+  only a partial read of Laaber et al. (2019) (first ten pages: abstract,
+  introduction, background, approach) and abstract-level reading of the
+  other cited papers. Before submission, read Laaber et al. (2019) in
+  full — in particular its threats-to-validity and related-work sections
+  — to confirm none of contributions 2-4 is already covered there.
 - This project's benchmark client is custom-built rather than YCSB
   (Cooper et al., 2010), the de facto standard for KV-store benchmarking.
   The workload types (mixed/read-heavy/write-heavy, §3) are conceptually
@@ -691,11 +712,10 @@ per-sample output by eye before trusting an aggregate.
   the cloud VM run does not have this confound and should be treated as
   the primary dataset where the two disagree, though in practice they
   agree closely (§4).
-- RMIT still shares a server process across many runs within a
-  repetition's shuffled order in terms of OS-level state (page cache, TCP
-  port reuse) even though the *metrics strategy* is freshly started per
-  run — full OS-level isolation (e.g., a fresh VM per run) was out of
-  scope.
+- The server process is restarted before every run, but OS-level state
+  (page cache, TCP port reuse, kernel socket buffers) still carries over
+  between runs on the same machine — full OS-level isolation (e.g., a
+  fresh VM per run) was out of scope.
 - Client and server always share the same machine (no `taskset` pinning
   or second-machine load generator was used for any RMIT dataset); at the
   highest concurrency levels tested (1000 clients / 4 vCPUs on the first
@@ -719,8 +739,9 @@ per-sample output by eye before trusting an aggregate.
   laptop** (pooled paired-ratio SD 0.021, n=15 reps/cell), **0.9% on Azure
   D4s_v6** (SD 0.017, n=30), and **2.1% on Azure D8s_v6 / advanced** (SD
   0.029, n=15) — recomputed directly from each dataset's
-  `raw_data_rmit.csv` (script: `benchmarks/analyze_rmit_results.py`'s
-  paired-ratio logic, extended with a stdev/MDE calculation). Most of the
+  `raw_data_rmit.csv` by `benchmarks/compute_mde.py` (rerunnable; the
+  formula is a rough paired-design estimate, not an exact power
+  calculation). Most of the
   adjacent-strategy gaps in §4 and §4b's tables (often 0.2-0.5
   percentage points) are below this floor in at least one dataset. This
   means "no significant crossover" and "adjacent strategies are
@@ -751,7 +772,7 @@ purpose-provisioned cloud VMs, 4,320 total benchmark runs across 240
 distinct configurations) eliminated the bimodal instability entirely and
 cut relative variability by roughly an order of magnitude, letting a much
 smaller, real signal come through cleanly: every instrumentation
-strategy tested costs a small, flat overhead (never above 2.3%,
+strategy tested costs a small, flat overhead (at most 2.31%,
 regardless of concurrency from 25 to 3000 clients or workload mix), with
 `thread_local` reliably cheapest and `sharded_2key` reliably second across
 all three independent runs. A rough power analysis (§7) shows this design
@@ -772,12 +793,18 @@ here follow a standard author/title/venue/year convention; convert to
 the target venue's required style (numbered IEEE, ACM reference format,
 etc.) at submission time — that is a mechanical reference-manager step,
 not a content change, so it has not been done speculatively for an
-unknown venue.
+unknown venue. Authors, titles, venues, and years were checked against
+publisher/library records via search; several page ranges (and the Abedi
+et al. 2015 page range, still missing) were not individually confirmed and
+must be re-verified against the publisher's record before submission.
 
 1. Abedi, A. and Brecht, T. (2017). Conducting Repeatable Experiments in
    Highly Variable Cloud Computing Environments. In *Proceedings of the
    8th ACM/SPEC International Conference on Performance Engineering
-   (ICPE '17)*, 287-298.
+   (ICPE '17)*, 287-292.
+1a. Abedi, A., Heard, C., and Brecht, T. (2015). Conducting Repeatable
+   Experiments and Fair Comparisons using 802.11n MIMO Networks. *ACM
+   SIGOPS Operating Systems Review*, 49(1).
 2. Aspnes, J., Herlihy, M., and Shavit, N. (1994). Counting Networks.
    *Journal of the ACM*, 41(5), 1020-1048.
 3. Boyd-Wickizer, S., Clements, A. T., Mao, Y., Pesterev, A., Kaashoek,
@@ -796,7 +823,7 @@ unknown venue.
    Always Wanted to Know About Synchronization but Were Afraid to Ask.
    In *Proceedings of the 24th ACM Symposium on Operating Systems
    Principles (SOSP '13)*, 33-48.
-7. Fan, B., Lim, H., Andersen, D. G., and Kaminsky, M. (2013). MemC3:
+7. Fan, B., Andersen, D. G., and Kaminsky, M. (2013). MemC3:
    Compact and Concurrent MemCache with Dumber Caching and Smarter
    Hashing. In *Proceedings of the 10th USENIX Symposium on Networked
    Systems Design and Implementation (NSDI '13)*, 371-384.
@@ -856,6 +883,9 @@ python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit_advan
 
 # Figures 1 and 2 (§4b), generated from the three rmit_analysis.json files above
 python3 benchmarks/generate_paper_figures.py
+
+# Minimum detectable effect numbers (§7), from the three raw_data_rmit.csv files above
+python3 benchmarks/compute_mde.py
 ```
 
 Machine specs, commit hash, and full runtime config are written to each

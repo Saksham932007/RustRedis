@@ -10,14 +10,15 @@ and how much that answer depends on benchmark design itself.
 An earlier fixed-order benchmark design (v5/v12) reported throughput coefficients of
 variation up to **0.70** and unexplained bimodal "fast/slow" states. Redesigning the
 experiment around **Randomized Multiple Interleaved Trials (RMIT)** — a technique
-defined by [Abedi & Brecht, ICPE 2017](docs/paper_draft.md#1-motivation-and-related-work)
-for exactly this class of problem, not invented by this project — shuffling run order
+proposed by Abedi, Heard & Brecht (2015) and shown necessary for cloud environments by
+[Abedi & Brecht, ICPE 2017](docs/paper_draft.md#1-motivation-and-related-work),
+not invented by this project — shuffling run order
 per repetition instead of grouping by strategy, and rerunning across three independent
 machines (a laptop and two cloud VMs), **eliminated the bimodal pattern entirely** (0 of
 240 configurations flagged as two-state, across all three datasets) and cut relative
 variability by roughly an order of magnitude. Under the corrected design, every
-instrumentation strategy costs a small, consistent throughput overhead — **never more
-than 2.3%**, holding steady from 100 to 3000 concurrent clients, with the top and bottom
+instrumentation strategy costs a small, consistent throughput overhead — **at most
+~2.3%**, holding steady from 100 to 3000 concurrent clients, with the top and bottom
 of the per-strategy ranking (thread_local cheapest, sharded_n tied-or-highest) holding
 across mixed/read-heavy/write-heavy workloads.
 
@@ -73,7 +74,7 @@ Relative 95% bootstrap CI width on throughput (CI width ÷ median):
 measure spread relative to center, and the gap is large enough for the comparison to be
 meaningful regardless.)
 
-### Instrumentation overhead: small, consistent, never above 2.3%
+### Instrumentation overhead: small, consistent, at most ~2.3%
 
 Mean throughput overhead vs. `disabled`, paired within the same RMIT repetition block
 (the valid RMIT comparison — every strategy in a block saw the same machine-state
@@ -87,10 +88,12 @@ conditions):
 | HdrHistogram | 2.14% | 1.42% | 1.53% |
 | Sharded-N | 1.97% | 1.60% | 1.98% |
 
-`ThreadLocal` is the cheapest strategy on every machine; `Sharded-N` and `HdrHistogram`
-are consistently the most expensive. No strategy ever exceeds ~2.3% overhead at any
-concurrency level tested (100–3000), and the ranking never crosses over in a way that
-holds up against measurement noise (see below).
+`ThreadLocal` is the cheapest strategy and `Sharded-2key` the second-cheapest on every
+machine; the order of the other three (`GlobalMutex`, `HdrHistogram`, `Sharded-N`)
+changes from machine to machine and is not claimed to be resolved (see the paper's §4b
+and §7). No strategy ever exceeds ~2.3% overhead at any concurrency level tested
+(100–3000), and the ranking never crosses over in a way that holds up against
+measurement noise (see below).
 
 ### Workload type doesn't change which strategy is cheapest
 
