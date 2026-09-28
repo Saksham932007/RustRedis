@@ -1,8 +1,10 @@
 # Observability Overhead Under Concurrency in an In-Memory Key-Value Store: An RMIT Measurement Study
 
 *Draft. Experiments are complete: 4,320 RMIT runs on a Linux laptop and two
-dedicated Azure VMs. Every table value and figure regenerates from committed
-scripts (see the Appendix); citations and page ranges have been checked.
+dedicated Azure VMs. Every table value, figure, and quoted statistic in §4-§7
+regenerates from committed scripts (`benchmarks/paper_tables.py`,
+`generate_paper_figures.py`, `compute_mde.py`, `simulate_mde.py`; see the
+Appendix); citations and page ranges have been checked.
 Known remaining work: (1) a live A/A run (§7); (2) author list and
 affiliation; (3) reformatting for the target venue. The scope is a modest,
 reproducible empirical measurement study rather than a new method; whether it
@@ -25,8 +27,9 @@ laptop and dedicated 4- and 8-vCPU Azure VMs — for 4,320 runs across 240
 configurations, 25 to 3000 concurrent clients, and mixed, read-heavy, and
 write-heavy workloads. No two-state throughput pattern appears in any
 configuration (0 of 240 flagged), and mean relative 95% CI width is 0.9%-1.8%.
-Every strategy costs 0.5%-2.1% throughput on average and at most 2.31% at any
-tested concurrency level. ThreadLocal is cheapest and Sharded-2key second on
+Every strategy costs 0.5%-2.1% throughput on average and at most 2.6% at any
+concurrency of 50 or more clients (workload-averaged; the laptop's noisier
+25-client cells reach 4.3%). ThreadLocal is cheapest and Sharded-2key second on
 all three machines; the order of the remaining three strategies varies by
 machine. A detectable-effect analysis (closed-form and injected-effect
 simulation) puts the design's resolution at roughly 1-2% depending on the
@@ -49,7 +52,7 @@ that frame, this paper contributes:
    microbenchmarks and explicitly make no claims about load or stress tests.
    This paper applies RMIT to a network server under up to 3000 concurrent
    clients on 4-8 vCPUs, across three machines, and reports the overhead of six
-   strategies (at most 2.31% per concurrency level) and which parts of their
+   strategies (at most 2.6% at 50 or more clients) and which parts of their
    ranking replicate across machines (ThreadLocal first, Sharded-2key second).
 2. **A "clean but wrong" failure that RMIT's own checks do not catch (§3).**
    File-descriptor exhaustion produced exactly `0 ops/sec` with `rc=0` and a
@@ -190,8 +193,9 @@ cloud microbenchmarking). This project's specific application:
   - **Laptop**: Intel i3-10110U (2C/4T), 8GB DDR4, Linux. 6 strategies x
     8 concurrency levels (25-500) x 15 repetitions = 720 runs. An active
     development session was running on this machine throughout (recorded
-    as a caveat in `experiment_results_rmit/metadata_rmit.json`), so load
-    average during runs was frequently 4-12 on a 4-thread CPU.
+    as a caveat in `experiment_results_rmit/metadata_rmit.json`), so the
+    1-minute load average during runs had a median of 9.3 (range 3.7-26.6)
+    on a 4-thread CPU.
   - **Cloud VM (v1)**: Azure `Standard_D4s_v6` (4 vCPU, 16GB RAM, Central
     India), provisioned solely for the run and deleted immediately after.
     6 strategies x 8 concurrency levels (100-1000) x 30 repetitions =
@@ -275,15 +279,18 @@ is not identical: `hdr_histogram` is highest on the laptop (2.14%) while
 `sharded_n` is highest on the cloud VM (1.60% vs. `hdr_histogram`'s 1.42%)
 — the two swap places at the bottom of the ranking (see §4b for the full
 three-dataset cross-check of which parts of this ranking replicate and
-which don't). Overhead is small on both machines regardless (under 2.2%
-everywhere), and the cloud VM's numbers are uniformly a bit lower than the
-laptop's — consistent with the laptop dataset carrying some contention
-from the development session sharing its 4 threads, rather than any
-strategy behaving qualitatively differently between machines. Individual
-per-block ratios ranged from 0.9573 to 0.9973 (laptop) and 0.9771 to
-1.0051 (cloud VM) — the one ratio slightly above 1.0 is noise (a
-strategy occasionally edging out `disabled` in a single block), not a
-reversal of the overall ranking.
+which don't). Overhead is small on both machines regardless (strategy
+means at most 2.14%), and the cloud VM's numbers are uniformly a bit lower
+than the laptop's — consistent with the laptop dataset carrying some
+contention from the development session sharing its 4 threads, rather than
+any strategy behaving qualitatively differently between machines. Per-cell
+median paired ratios ranged from 0.9573 to 0.9973 (laptop) and 0.9771 to
+1.0051 (cloud VM) — the one cell slightly above 1.0 is noise (a strategy
+edging out `disabled` in that cell), not a reversal of the overall ranking.
+The largest single-cell overhead is the laptop's 4.27% (`hdr_histogram` at 25
+clients, where every strategy except `sharded_2key` is at or above 2.3%); from
+50 clients up the laptop's maximum is 2.59% (`sharded_n` at 400), and Azure
+D4s_v6's is 2.29% (`sharded_n` at 600).
 
 ## 4b. Extending the Design: Workload Type and Higher Concurrency
 
@@ -333,11 +340,13 @@ minimum detectable effect (§7), consistent with reading these as "small
 and flat," not "trending," across the tested range.
 
 `thread_local` never exceeds 1.0% at any concurrency
-level tested; `sharded_n` never exceeds 2.31%. The server's own
-throughput roughly saturates rather than collapses under load — disabled
-baseline throughput drops from ~280-286k ops/sec at c=100 to ~231-239k at
-c=3000 (about a 16-18% decline) while p99 latency rises from under 1ms to
-83-87ms, a graceful saturation curve rather than a cliff.
+level tested; `sharded_n` never exceeds 2.31% (workload-averaged; single
+concurrency-by-workload cells reach up to 3.23%, `sharded_n` at 750 clients,
+write-heavy). The server's own throughput roughly saturates rather than
+collapses under load — disabled baseline throughput peaks near 300k ops/sec
+at c=250, then drops from ~280-286k at c=100 to ~231-239k at c=3000 (about a
+16-18% decline) while p99 latency rises from under 1ms to 83-87ms, a graceful
+saturation curve rather than a cliff.
 
 **Workload type does not change which strategy is cheapest.** Averaging
 overhead across all 8 concurrency levels for each workload:
@@ -371,7 +380,7 @@ has the highest median throughput at each concurrency level) reports 6
 leader changes across the 3 workloads — e.g. `thread_local` and
 `disabled` trade the lead multiple times in the mixed workload between
 c=100 and c=1000. Given every strategy's overhead is within about 2.3% of
-`disabled` at every concurrency level (previous table), a leader change
+`disabled` at every concurrency level (workload-averaged; previous table), a leader change
 driven by sub-2%, sub-CI-width differences is exactly what pure
 measurement noise looks like, not a genuine strategy-concurrency
 interaction. We report the crossover count because the tooling now
@@ -435,9 +444,12 @@ CPU frequency, governor, thermal-zone temperature, memory and swap
 availability, 1/5/15-minute load average, and AC/battery status (fields are
 `null` where the hardware lacks them, e.g. thermal sensors and batteries on
 the Azure VMs). These logs allow post-hoc checks that a run was not
-disturbed — for example, the laptop's development session kept its load
-average at 4-12 on a 4-thread CPU throughout, which is recorded rather than
-hidden (§7).
+disturbed — for example, the laptop's development session kept its 1-minute
+load average at a median of 9.3 (range 3.7-26.6) on a 4-thread CPU, which is
+recorded rather than hidden (§7). Load averages on the dedicated Azure VMs are
+also high (medians 8.5 and 14.6), but there they largely reflect the
+benchmark's own hundreds to thousands of client threads rather than outside
+interference.
 
 The two-state check in `benchmarks/analyze_rmit_results.py` is a deliberately
 simple heuristic: split each configuration's throughputs at their largest gap
@@ -458,8 +470,9 @@ Two audiences can act on this work directly.
 
 **For anyone choosing a metrics-collection strategy for a similar
 concurrent server:** the overhead of per-command observability here is
-small enough (at most 2.31% at every concurrency level tested, on every
-workload and every machine) that "does instrumentation cost too much" is
+small enough (at most 2.6% at any concurrency of 50 or more clients,
+workload-averaged, on every machine; single cells reach 3.2%) that "does
+instrumentation cost too much" is
 not, by itself, a reason to leave it disabled in production for a system
 in this class (single-process, in-memory, network-bound). Within that
 small budget, the choice of *strategy* still matters in a stable way:
@@ -602,8 +615,8 @@ on three machines — a Linux laptop and dedicated 4- and 8-vCPU Azure VMs —
 over 4,320 runs and 240 configurations, from 25 to 3000 concurrent clients and
 three workload mixes. No two-state throughput pattern appeared, and run-to-run
 variability was low (mean relative 95% CI width 0.9%-1.8%). Every strategy
-costs a small, flat overhead (0.5%-2.1% on average, at most 2.31% at any tested
-concurrency), with `thread_local` cheapest and `sharded_2key` second on all three
+costs a small, flat overhead (0.5%-2.1% on average, at most 2.6% at 50 or more
+clients), with `thread_local` cheapest and `sharded_2key` second on all three
 machines. The design detects overheads of roughly 1-2% (§7), so finer
 distinctions among the other three strategies are unresolved, not absent.
 Two methodological points generalize beyond this server: randomizing
@@ -722,7 +735,10 @@ RMIT_ENVIRONMENT_LABEL=<label> python3 benchmarks/run_rmit_experiment.py \
   --output-dir experiment_results_rmit_advanced
 python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit_advanced/raw_data_rmit.csv
 
-# Figures 1 and 2 (§4b), generated from the three rmit_analysis.json files above
+# Every table value and quoted statistic in §4-§4b (prints them all), from the three rmit_analysis.json files above
+python3 benchmarks/paper_tables.py
+
+# Figures 1 and 2 (§4b), generated from the same files
 python3 benchmarks/generate_paper_figures.py
 
 # Minimum detectable effect numbers (§7), from the three raw_data_rmit.csv files above
