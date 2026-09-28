@@ -274,8 +274,28 @@ def collect_machine_specs(root_dir: Path) -> Dict[str, object]:
     }
 
 
+def raise_fd_limit(min_soft_limit: int = 65536) -> None:
+    """Raise this process's open-file-descriptor soft limit as high as the
+    hard limit allows. Server and benchmark-client subprocesses inherit
+    rlimits from their parent, so doing this once here covers both without
+    touching /etc/security/limits.conf or needing root. Without this, the
+    default soft limit (often 1024) silently caps how many concurrent
+    client connections can actually open sockets — every run above that
+    ceiling reports 0 ops/sec with no error message, not a clean failure."""
+    try:
+        import resource
+    except ImportError:
+        return  # not available on this platform; caller should check ulimit -n manually
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = min(min_soft_limit, hard)
+    if soft < target:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+
+
 def main() -> None:
     args = parse_args()
+    raise_fd_limit()
     root_dir = Path(__file__).resolve().parents[1]
     output_dir = (root_dir / args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -291,6 +311,20 @@ def main() -> None:
     for w in workloads:
         if w not in VALID_WORKLOADS:
             raise SystemExit(f"Invalid workload '{w}'; must be one of {VALID_WORKLOADS}")
+
+    try:
+        import resource
+        soft_fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        needed = max(concurrency_levels) + 256  # client sockets + stdio/log/misc headroom
+        if soft_fd_limit < needed:
+            print(f"WARNING: open-file-descriptor soft limit is {soft_fd_limit}, but the highest "
+                  f"concurrency level ({max(concurrency_levels)}) needs at least ~{needed}. "
+                  f"raise_fd_limit() could not raise it far enough (hard limit too low) — runs at "
+                  f"high concurrency will silently report 0 ops/sec. Check `ulimit -Hn` and your "
+                  f"container/systemd/user-session fd limits.")
+    except ImportError:
+        pass
+
     rng = random.Random(args.seed)
 
     run_id = args.resume_run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
