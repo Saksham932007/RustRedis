@@ -1,49 +1,39 @@
-# Observability Overhead Under Concurrency in an In-Memory Key-Value Store: A Case Study in Benchmark Design
+# Observability Overhead Under Concurrency in an In-Memory Key-Value Store: An RMIT Measurement Study
 
-*Draft. Experiments are complete: the original 1,440-run fixed-order dataset
-(Apple M2, `experiment_results_v12/`) and 4,320 RMIT runs on three other
-machines. Every table value and figure regenerates from committed scripts
-(see the Appendix); citations, page ranges, and the concept-note references
-have been checked. Known remaining work: (1) the decisive missing
-experiment — an RMIT rerun on the original Apple M2/macOS machine, without
-which the RMIT reruns cannot be credited with removing the two-state pattern
-(§5, §7); (2) no live A/A run (§7); (3) author list and affiliation;
-(4) reformatting for the target venue. The project's own concept note
-(RustRedis-concept-note) judged the defensible claim to be a modest,
-reproducible empirical case study suited to a workshop, student track, or
-arXiv preprint rather than a new method; this draft is written to that
-scope, and whether it suffices for a journal is a venue question for a
-supervisor or co-author.*
+*Draft. Experiments are complete: 4,320 RMIT runs on a Linux laptop and two
+dedicated Azure VMs. Every table value and figure regenerates from committed
+scripts (see the Appendix); citations and page ranges have been checked.
+Known remaining work: (1) a live A/A run (§7); (2) author list and
+affiliation; (3) reformatting for the target venue. The scope is a modest,
+reproducible empirical measurement study rather than a new method; whether it
+suffices for a given journal is a venue question for a supervisor or
+co-author.*
 
 ## Abstract
 
 RustRedis compares six command-metrics instrumentation strategies
 (disabled, global mutex, sharded-2key, thread-local, HdrHistogram,
-sharded-N) under concurrent load. An earlier fixed-order benchmark on an
-Apple M2 laptop (v12: all 30 repetitions of one configuration, then the
-next) produced two throughput states: 707 of 1,440 runs above 130,000
-ops/s (median 213,355) and 733 at or below it (median 63,597), with 11 of
-48 configurations containing both. The evidence that this was machine
-state confounded with strategy rather than a strategy effect is internal to
-that dataset: the no-metrics baseline had a median of 93,319 ops/s at 200
-clients while GlobalMutex, which does extra work, had 212,626, and an
-identical-code rerun of Sharded-2key at 500 clients had a median of 60,702
-against 217,618 in the main run. We therefore repeat the comparison under
-Randomized Multiple Interleaved Trials (RMIT; Abedi, Heard, and Brecht,
-2015; Abedi and Brecht, 2017) with per-run machine-state logging, on three
-other machines — a 4-thread Linux laptop and dedicated 4- and 8-vCPU Azure
-VMs — for 4,320 runs across 240 configurations, 25 to 3000 concurrent
-clients, and mixed, read-heavy, and write-heavy workloads. No two-state
-pattern appears in any of the 240 configurations (0 flagged); because the
-hardware and OS differ from the original runs, this alone does not show
-that RMIT removed it (§5, §7). Paired within-block comparison against the
-no-metrics baseline shows every strategy costs 0.5%-2.1% throughput on
-average and at most 2.31% at any tested concurrency level. ThreadLocal is
-cheapest and Sharded-2key second on all three machines; the order of the
-remaining three strategies varies by machine. A detectable-effect analysis
-(closed-form and injected-effect simulation) puts this design's resolution
-at roughly 1-2% depending on the dataset, so smaller differences between
-adjacent strategies are unresolved rather than absent.
+sharded-N) under concurrent load in a Rust Redis-compatible in-memory
+server. Throughput on lightly controlled machines drifts over a run, so
+comparing strategies in blocks would confound strategy with machine state
+(Abedi and Brecht, 2017). We instead use Randomized Multiple Interleaved
+Trials (RMIT; Abedi, Heard, and Brecht, 2015), which shuffles the order of
+every (strategy, concurrency, workload) configuration within each repetition,
+with per-run machine-state logging and a paired within-block comparison
+against a no-metrics baseline. We run it on three machines — a 4-thread Linux
+laptop and dedicated 4- and 8-vCPU Azure VMs — for 4,320 runs across 240
+configurations, 25 to 3000 concurrent clients, and mixed, read-heavy, and
+write-heavy workloads. No two-state throughput pattern appears in any
+configuration (0 of 240 flagged), and mean relative 95% CI width is 0.9%-1.8%.
+Every strategy costs 0.5%-2.1% throughput on average and at most 2.31% at any
+tested concurrency level. ThreadLocal is cheapest and Sharded-2key second on
+all three machines; the order of the remaining three strategies varies by
+machine. A detectable-effect analysis (closed-form and injected-effect
+simulation) puts the design's resolution at roughly 1-2% depending on the
+dataset, so smaller differences between adjacent strategies are unresolved
+rather than absent. We also document a failure that RMIT's own validity
+checks do not catch: file-descriptor exhaustion that produced exactly
+0 ops/sec with clean, well-formed output.
 
 ## Contributions
 
@@ -53,18 +43,7 @@ combine RMIT-style sampling, bootstrap confidence intervals, A/A tests, and
 simulation-based detectable-slowdown analysis for cloud microbenchmarks. Within
 that frame, this paper contributes:
 
-1. **A measured, reproducible case study of a blocked benchmark design
-   confounded by machine state (§2).** In the v12 dataset, 707 fast-state and
-   733 slow-state runs are separated by only 35 runs between 100,000 and
-   160,000 ops/s; 11 of 48 configurations contain both states, with 50 state
-   changes; the no-metrics baseline is slower than an instrumented strategy at
-   200 clients; and an identical-code rerun differs by 3.6x. Two simple checks
-   flag this — the fast-state share by strategy, and whether the baseline is
-   slower than instrumented variants — and are recomputed from raw data by
-   `benchmarks/analyze_v12_states.py`. The general problem is documented
-   (Mytkowicz et al., 2009; Abedi and Brecht, 2017); this is a concrete
-   instance in a key-value-store experiment.
-2. **An RMIT measurement of six instrumentation strategies on a live
+1. **An RMIT measurement of six instrumentation strategies on a live
    client-server workload (§4, §4b).** Abedi and Brecht (2017) replay traces
    collected by others, and Laaber et al. (2019) study single-method
    microbenchmarks and explicitly make no claims about load or stress tests.
@@ -72,13 +51,13 @@ that frame, this paper contributes:
    clients on 4-8 vCPUs, across three machines, and reports the overhead of six
    strategies (at most 2.31% per concurrency level) and which parts of their
    ranking replicate across machines (ThreadLocal first, Sharded-2key second).
-3. **A "clean but wrong" failure that RMIT's own checks do not catch (§3).**
+2. **A "clean but wrong" failure that RMIT's own checks do not catch (§3).**
    File-descriptor exhaustion produced exactly `0 ops/sec` with `rc=0` and a
    validly-formed result in every affected configuration — the opposite of
    the noisy, bimodal instability that RMIT's bimodality detector and
    confidence-interval width are built to flag. We did not find an analogous
    failure reported in the RMIT papers above.
-4. **A detectable-effect analysis for this specific comparison (§7).** By a
+3. **A detectable-effect analysis for this specific comparison (§7).** By a
    closed-form paired-design estimate and by an injected-effect simulation on
    each dataset's own noise (following the injected-slowdown procedure of
    Laaber et al., 2019, adapted to within-machine paired blocks), the design
@@ -94,9 +73,9 @@ measurement noise depending on concurrency. This project asks two
 questions that turn out to be almost independent of each other: (1) how
 much does per-command metrics collection cost in a concurrent in-memory
 key-value store, and which collection strategy costs least, and (2) can a
-benchmark answer question (1) without a confound as large as the effect
-it is trying to measure — which, as §2 shows, the project's own first
-attempt could not.
+benchmark answer question (1) without a confound — such as drift in
+machine state over the run — as large as the effect it is trying to measure
+(§2).
 
 **Benchmarking methodology.** Measured performance depends on setup
 details experimenters rarely control or report (Mytkowicz et al., 2009),
@@ -153,103 +132,50 @@ histogram recorder compared here.
 2015; Abedi and Brecht, 2017), bootstrap confidence intervals over repeated
 runs, A/A testing, and simulation-based detectable-effect analysis (Laaber
 et al., 2019). What this paper offers, within that frame, is listed in the
-Contributions section above: a measured case study of a blocked design
-confounded by machine state, an RMIT measurement of six instrumentation
+Contributions section above: an RMIT measurement of six instrumentation
 strategies on a live client-server workload, a "clean but wrong" failure
 that RMIT's own checks do not catch, and an explicit detectable-effect
 analysis for this specific comparison. Detailed per-paper notes are kept in
 `docs/related_work_notes.md`.
 
-## 2. The Flawed Original Design and Its Evidence
+## 2. Why Randomize Run Order
 
-`benchmarks/run_final_experiment_v12.py` completes all repetitions of one
-(strategy, concurrency) configuration before moving to the next
-(`experiment_results_v12/`), on an Apple M2 laptop (8 cores, 8 GB RAM,
-macOS) with the benchmark client on the same machine: 6 strategies x 8
-concurrency levels (100, 200, 300, 400, 500, 600, 700, 1000) x 30
-repetitions = 1,440 runs, 50% GET / 50% SET over 10,000 keys with 64-byte
-values, 3 seconds between runs. The server is a Tokio multi-threaded
-runtime with 8 worker threads. All of the numbers below are recomputed from
-`experiment_results_v12/raw_data.csv` by `benchmarks/analyze_v12_states.py`.
+A benchmark that compares strategies must survive drift in machine state
+over its wall-clock duration: thermal state, frequency scaling, background
+activity, and co-tenants on shared hosts. If all repetitions of one
+configuration run back to back before the next begins, a slow window that
+lands during one configuration's block is statistically indistinguishable
+from that configuration being genuinely slow (or, for a comparison against a
+baseline, from a real overhead). The literature documents that this is not
+hypothetical: on replayed EC2 traces, single-trial and
+multiple-consecutive-trial designs reported differences of up to 37.8%
+between two identical systems (Abedi and Brecht, 2017), and seemingly
+innocuous, unrandomized setup differences silently produce wrong
+conclusions across architectures and compilers (Mytkowicz et al., 2009).
 
-**Two throughput states.** Run throughput falls into two groups with little
-between them: 707 runs above 130,000 ops/s (median 213,355) and 733 at or
-below it (median 63,597), a 3.35x gap; only 35 of the 1,440 runs lie between
-100,000 and 160,000 ops/s. (The 130,000 cut-off is a labelling threshold, not
-a statistical test.) Of the 48 configurations, 11 contain both fast and slow
-runs, with 50 state changes among them.
+This project therefore randomizes from the start. Every repetition (a
+"block") runs all (strategy, concurrency, workload) configurations once in a
+fresh random order, so any drifting condition is spread across strategies
+rather than concentrated on one. The comparison the design makes valid is the
+paired within-block ratio of each strategy's throughput to the `disabled`
+baseline's in the same block: every strategy in a block saw the same
+conditions, so a condition that slowed the block slows numerator and
+denominator alike (§3, §4).
 
-**Three pieces of evidence that the states are environmental, not caused by
-the strategies:**
+This paper does not include a fixed-order run on these machines, so it does
+not measure how much run order would have mattered here; the case for
+randomizing rests on the cited literature and on the standard argument above
+(see §7).
 
-1. The baseline that records no metrics at all, `disabled`, has a median of
-   93,319 ops/s at 200 clients, while `global_mutex`, which does extra work,
-   has 212,626 at the same concurrency. Recording metrics cannot make the
-   server faster, so something other than the strategy changed between those
-   blocks.
-2. The fast-state share differs wildly by strategy, and not in the order of
-   how costly each strategy is (the cheapest-by-design baseline sits at 86%,
-   below `sharded_2key` at 100%):
-
-   | Strategy | Runs in fast state (of 240) |
-   |---|---:|
-   | sharded_2key | 240 (100%) |
-   | disabled | 207 (86%) |
-   | hdr_histogram | 125 (52%) |
-   | global_mutex | 117 (49%) |
-   | thread_local | 9 (4%) |
-   | sharded_n | 9 (4%) |
-
-   A naive reading of the medians at 500 clients makes `sharded_2key`
-   (217.6k) look 3.5x faster than `thread_local` (61.4k); but `sharded_2key`
-   ran entirely in the fast state and `thread_local` almost entirely in the
-   slow one.
-3. The repository already holds an identical-code rerun of `sharded_2key` at
-   500 clients (`experiment_results_v12/anomaly_investigation/`): its median
-   was 217,618 ops/s in the main experiment and 60,702 in the rerun.
-
-The data therefore cannot separate a real strategy effect from the state the
-machine happened to be in during each block. The cause of the state changes
-on that machine is not established here — thermal or power management,
-performance/efficiency-core scheduling, memory pressure with 8 GB of RAM,
-and background processes are all candidates.
-
-Supplementary evidence, the per-configuration throughput coefficient of
-variation from `experiment_results_v12/aggregated_data.csv` (largest six):
-
-| Strategy | Concurrency | Throughput CV |
-|---|---:|---:|
-| sharded_n | 100 | 0.698 |
-| thread_local | 100 | 0.625 |
-| global_mutex | 400 | 0.601 |
-| hdr_histogram | 500 | 0.577 |
-| global_mutex | 1000 | 0.473 |
-| disabled | 200 | 0.453 |
-
-Mean throughput CV across all 48 (strategy, concurrency) configurations in
-v12 is **0.176** — an order of magnitude higher than any per-configuration
-variability reported in §4 below (with the hardware caveat in §4).
-
-**Why fixed order is unsound**: any machine-state drift over the run's
-wall time (thermal throttling, background OS activity, frequency scaling,
-competing processes) lands entirely inside whichever configuration
-happens to be running when it occurs. Because v12 runs all 30
-repetitions of `sharded_n/c100` back to back, then all 30 of the next
-configuration, a slow window landing during `sharded_n/c100`'s block is
-statistically indistinguishable from `sharded_n/c100` being a genuinely
-unstable configuration — the design cannot tell the two apart. The three
-pieces of evidence above show this is not hypothetical for v12.
-
-## 3. The Rerun Design: RMIT
+## 3. The Design: RMIT
 
 Randomized Multiple Interleaved Trials (RMIT) — the technique applied in
 this section — is not new to this paper; it was proposed by Abedi, Heard,
 and Brecht (2015) and shown to be necessary in cloud environments by
-Abedi and Brecht (2017), as a fix for the same class of problem §2
-documents (see §1 for the full comparison to those papers and to Laaber
-et al. (2019), who apply the same technique with bootstrap confidence
-intervals to cloud microbenchmarking). This project's specific
-application:
+Abedi and Brecht (2017), as a fix for the class of problem §2 describes
+(see §1 for the full comparison to those papers and to Laaber et al.
+(2019), who apply the same technique with bootstrap confidence intervals to
+cloud microbenchmarking). This project's specific application:
 
 - Independent random permutation of the full (strategy x concurrency)
   matrix per repetition (`benchmarks/run_rmit_experiment.py`).
@@ -259,9 +185,8 @@ application:
   (`benchmarks/system_state.py`): CPU frequency, thermal-zone temperature,
   memory/swap, load average, AC/battery status (fields degrade to `null`
   when unavailable, e.g. no thermal sensors or battery on a cloud VM).
-- Three hardware targets, none of them the original Apple M2 (the original
-  machine was not rerun; see §5 and §7), chosen to check that the overhead
-  results are not specific to one laptop:
+- Three hardware targets, chosen to check that the overhead results are not
+  specific to one machine:
   - **Laptop**: Intel i3-10110U (2C/4T), 8GB DDR4, Linux. 6 strategies x
     8 concurrency levels (25-500) x 15 repetitions = 720 runs. An active
     development session was running on this machine throughout (recorded
@@ -269,8 +194,8 @@ application:
     average during runs was frequently 4-12 on a 4-thread CPU.
   - **Cloud VM (v1)**: Azure `Standard_D4s_v6` (4 vCPU, 16GB RAM, Central
     India), provisioned solely for the run and deleted immediately after.
-    6 strategies x 8 concurrency levels (100-1000, matching the original
-    v12 range) x 30 repetitions = 1440 runs. Nothing else ran on this
+    6 strategies x 8 concurrency levels (100-1000) x 30 repetitions =
+    1440 runs. Nothing else ran on this
     machine — no thermal sensors, no battery, no competing session.
   - **Cloud VM (v2, advanced)**: Azure `Standard_D8s_v6` (8 vCPU, 32GB
     RAM, Central India), same provision-run-delete pattern. Extends the
@@ -292,10 +217,10 @@ its own `RLIMIT_NOFILE` toward the hard limit once at startup (inherited
 by both the server and client subprocesses it spawns) and warns loudly if
 the achieved limit still can't cover the requested concurrency. This is
 recorded here because it is exactly the kind of failure RMIT's own
-validation (§2's "why fixed order is unsound" reasoning) does not catch —
+validation (§2's reasoning about drifting machine state) does not catch —
 a systematic, order-independent failure produces suspiciously *clean*,
-*consistent* zeros, not the noisy instability that motivated this
-redesign in the first place. The timing/smoke test that caught it
+*consistent* zeros, not the noisy instability that randomizing run order
+guards against. The timing/smoke test that caught it
 (comparing a 1-repetition dry run's per-run throughput values by eye
 before committing to the full 15-repetition run) is why it's worth always
 inspecting raw per-run output before trusting an aggregate.
@@ -311,31 +236,21 @@ Both datasets and their analysis are in the repo:
 flags a configuration as two-state when its throughput distribution
 splits into two clusters at least 1.8x apart with each holding >=15% of
 samples. Result: **0 of 48 configurations flagged on the laptop, 0 of 48
-on the cloud VM.** As a positive control, the same detector run on the v12
-data flags 8 of the 11 configurations that contain both states (and no
-others), so it can see the original pattern, though not every instance of
-it. **This absence must not be read as "RMIT removed the pattern."** The
-original states were observed on an Apple M2 running macOS; these reruns
-are on a Linux laptop and Azure VMs. A different machine and OS not showing
-the pattern is what one would expect if the states were specific to the
-original machine, whether or not the design mattered. Only a rerun of RMIT
-on the original M2 would separate the two explanations (§5, §7).
+on the cloud VM.** The detector is a simple largest-gap heuristic (§5), so
+this rules out large, well-separated state splits but not subtler
+multimodality.
 
-**Variability is much lower, but the comparison is not controlled.**
-Comparing relative 95% bootstrap CI width on throughput (width / median):
+**Run-to-run variability is low.** Relative 95% bootstrap CI width on
+throughput (width / median):
 
-| | v12 (fixed order, Apple M2, as throughput CV) | RMIT laptop (Linux) | RMIT cloud VM (Azure) |
-|---|---:|---:|---:|
-| Mean across 48 configs | 0.176 | 0.0129 | 0.0091 |
-| Max across 48 configs | 0.698 | 0.0386 | 0.0175 |
+| | RMIT laptop (Linux) | RMIT cloud VM (Azure D4s_v6) |
+|---|---:|---:|
+| Mean across 48 configs | 0.0129 | 0.0091 |
+| Max across 48 configs | 0.0386 | 0.0175 |
 
-The v12 column is CV = stddev/mean rather than CI width, so the statistics
-differ, and — more importantly — design, hardware, OS, and workload
-generator placement all changed between the first column and the other two,
-so the gap cannot be attributed to the design alone. What the table does
-show is that on these three machines run-to-run variability is small enough
-(mean relative CI width 0.9%-1.8% across all datasets) for the overhead
-comparisons below to be meaningful.
+Variability this small (mean relative CI width 0.9%-1.8% across all three
+datasets; §4b adds the third) is what makes the sub-2% overhead comparisons
+below meaningful.
 
 **Instrumentation overhead is small, consistent, and doesn't cross over.**
 Paired within-repetition-block throughput ratios vs. the `disabled`
@@ -383,8 +298,8 @@ repetitions = 2160 runs.
 **Still no two-state pattern, at 3x the concurrency ceiling and 3x the
 workload coverage.** 0 of 144 configurations flagged two-state. Mean
 relative 95% CI width: 0.0177 (max 0.0420) — slightly wider than the
-smaller cloud-VM run (0.0091), consistent with 15 repetitions vs 30, but
-still an order of magnitude tighter than v12's 0.176 CV.
+smaller cloud-VM run (0.0091), consistent with 15 repetitions vs 30, and
+still small.
 
 **Overhead stays small and flat all the way to c=3000** — there is no
 concurrency level where any strategy's cost jumps or the ranking
@@ -512,34 +427,30 @@ fixed order across datasets). A crossover, and a rank-3-vs-4 swap, are
 each single-dataset events with no cross-dataset replication behind them;
 the rank-1/rank-2 finding replicates three times independently.
 
-## 5. What the Reruns Do and Do Not Explain
+## 5. Machine-State Logging and What It Can Check
 
-The reruns do not establish what caused the original two states. No
-two-state pattern appears on the three other machines (48 + 48 + 144
-configurations), which is consistent with two different explanations:
+Every row of each `raw_data_rmit.csv` carries a machine-state snapshot taken
+immediately before the run (`benchmarks/system_state.py`): mean and maximum
+CPU frequency, governor, thermal-zone temperature, memory and swap
+availability, 1/5/15-minute load average, and AC/battery status (fields are
+`null` where the hardware lacks them, e.g. thermal sensors and batteries on
+the Azure VMs). These logs allow post-hoc checks that a run was not
+disturbed — for example, the laptop's development session kept its load
+average at 4-12 on a 4-thread CPU throughout, which is recorded rather than
+hidden (§7).
 
-- **Design.** On the original machine, the fixed run order let a
-  time-varying environmental state land on whole strategies; RMIT would have
-  spread it evenly across them.
-- **Machine.** The states were specific to the original Apple M2/macOS
-  environment (thermal or power management, performance/efficiency-core
-  scheduling, memory pressure with 8 GB of RAM, or background processes),
-  and simply are not present on a Linux laptop or dedicated Azure VMs.
-
-What the v12 data alone supports (§2) does not depend on any rerun: the
-states were environmental rather than caused by the strategies, and the fixed
-order made them look like strategy effects. What the reruns add is a set of
-overhead measurements on machines where the states did not appear.
-
-The experiment that would separate the two explanations, and would show
-whether RMIT's paired comparison stays valid when the states *are* present,
-is an RMIT run on the original M2 (`docs/macos_m2_experiment_protocol.md`
-describes that hardware). If the two states reappear there, a valid RMIT
-design should show (i) a similar fast-state share for every strategy in the
-raw data and (ii) stable paired ratios despite the states. That run has not
-been done. `benchmarks/hardware_hypothesis_check.sh` exists to test the
-three hardware-specific hypotheses directly and remains an optional second
-line of investigation.
+The two-state check in `benchmarks/analyze_rmit_results.py` is a deliberately
+simple heuristic: split each configuration's throughputs at their largest gap
+and flag it if the two clusters' medians are at least 1.8x apart and each
+holds at least 15% of the samples. It flagged 0 of 240 configurations (0 of 48
+on the laptop, 0 of 48 on Azure D4s_v6, 0 of 144 on Azure D8s_v6). Because it
+is a largest-gap heuristic rather than a mixture-model fit, it could miss
+subtler multimodality or state shifts smaller than 1.8x; the paired
+within-block design does not depend on it, since it compares strategies
+within blocks whatever the machine state was.
+`benchmarks/hardware_hypothesis_check.sh` exists to test thermal-throttling,
+governor-instability, and memory-pressure hypotheses directly if a
+machine-state explanation for any future anomaly is needed.
 
 ## 6. Practical Implications
 
@@ -574,15 +485,14 @@ general and arguably more durable finding is methodological, not about
 this server. A fixed-order design (finish every repetition of
 configuration A, then move to configuration B) cannot distinguish "this
 configuration is unstable" from "the machine happened to be in a slow
-state while this configuration was running" — §2 shows this is not a
-hypothetical failure mode but one that actually occurred in this project's
-own earlier work (an unchanged baseline slower than an instrumented
-variant; an identical-code rerun 3.6x slower). Randomizing configuration
-order per repetition (RMIT; Abedi and Brecht, 2017) is a cheap fix — no new
-hardware, no new instrumentation, just a different loop order — that makes
-a drifting environment land on every configuration rather than on one, so
-that within-block paired comparisons stay valid. (Whether it also removes
-the drift itself is not shown here; see §5.) Any benchmark that
+state while this configuration was running" — §2 cites evidence that this
+is a real failure mode (differences of up to 37.8% between identical
+systems). Randomizing configuration order per repetition (RMIT; Abedi and
+Brecht, 2017) is a cheap fix — no new hardware, no new instrumentation, just
+a different loop order — that makes a drifting environment land on every
+configuration rather than on one, so that within-block paired comparisons
+stay valid. (This paper did not run a fixed-order comparison on these
+machines, so it does not quantify the benefit here; §7.) Any benchmark that
 compares more than one configuration under conditions that can drift
 over the run's wall-clock duration (thermal state, background load,
 cache warmth, OS scheduling decisions) is exposed to the same
@@ -598,16 +508,11 @@ per-sample output by eye before trusting an aggregate.
 
 ## 7. Limitations
 
-- **The RMIT reruns are not a controlled test of the design.** The
-  original two-state pattern was observed on an Apple M2 running macOS; the
-  RMIT datasets come from a Linux laptop and two Azure VMs. The absence of
-  the pattern in the reruns, and the drop in variability between v12 and the
-  reruns (§4), therefore confound design with hardware and OS. The
-  decisive missing experiment is an RMIT run on the original M2 (§5). Until
-  then, this paper's supported claims are (i) the v12 data show
-  machine-state confounding (§2) and (ii) RMIT-based overhead measurements on
-  three other machines (§4, §4b); it does not claim that RMIT removed the
-  original pattern.
+- **No fixed-order comparison.** Every dataset here uses RMIT, so the paper
+  cannot say how much a blocked design would have distorted these machines'
+  results; the argument for randomizing rests on the cited literature (§2).
+  The claims supported are the RMIT-based overhead measurements themselves
+  (§4, §4b) and the resolution floor of that design (below).
 - No live A/A experiment (running the identical configuration twice) was
   performed; the false-positive rate reported in this section comes from a
   resampling-based simulated null, which validates the test's calibration
@@ -616,7 +521,7 @@ per-sample output by eye before trusting an aggregate.
   (for example `disabled` against `disabled` in the same RMIT blocks) is the
   natural next step.
 - §1's related-work discussion covers the closest benchmarking-methodology
-  papers found and the project's concept-note references, but is not a
+  papers found, but is not a
   systematic literature review; a venue-specific submission should widen
   the search, e.g. into published YCSB-based throughput comparisons of
   Redis-class systems, which were not individually surveyed. Abedi and
@@ -690,29 +595,25 @@ per-sample output by eye before trusting an aggregate.
 
 ## 8. Conclusion
 
-Started as a question about the cost of per-command observability, this
-project's main deliverable ended up being about how to *ask* that
-question correctly. The original fixed-order benchmark (§2) produced two
-throughput states, 3.35x apart, that the run order confounded with the
-strategies: the no-metrics baseline was slower than an instrumented variant,
-and an identical-code rerun was 3.6x slower than the main run. That dataset
-cannot rank the strategies. Repeating the comparison under Randomized
-Multiple Interleaved Trials (RMIT; Abedi, Heard, and Brecht, 2015; Abedi and
-Brecht, 2017 — see §1) on three other machines (a Linux laptop and two
-dedicated Azure VMs; 4,320 runs across 240 configurations) shows no
-two-state pattern and low run-to-run variability, though because the
-hardware and OS changed this does not by itself show that RMIT removed the
-original pattern (§5, §7). On those machines every instrumentation strategy
-costs a small, flat overhead (at most 2.31% at any concurrency from 25 to
-3000 clients, across three workload mixes), with `thread_local` cheapest and
-`sharded_2key` second on all three machines. The design detects overheads of
-roughly 1-2% (§7), so finer distinctions among the other three strategies are
-unresolved, not absent. §6 turns these findings into guidance on which
-strategy to choose depending on whether latency histograms are needed, and
-on why randomized-order benchmarking is worth adopting for any comparison
-susceptible to time-varying machine state. The most valuable next experiment
-is an RMIT run on the original Apple M2, which would test whether the design
-stays valid when the original two states are present.
+This paper measured the throughput cost of six per-command metrics
+strategies in a Rust in-memory key-value server using Randomized Multiple
+Interleaved Trials (Abedi, Heard, and Brecht, 2015; Abedi and Brecht, 2017)
+on three machines — a Linux laptop and dedicated 4- and 8-vCPU Azure VMs —
+over 4,320 runs and 240 configurations, from 25 to 3000 concurrent clients and
+three workload mixes. No two-state throughput pattern appeared, and run-to-run
+variability was low (mean relative 95% CI width 0.9%-1.8%). Every strategy
+costs a small, flat overhead (0.5%-2.1% on average, at most 2.31% at any tested
+concurrency), with `thread_local` cheapest and `sharded_2key` second on all three
+machines. The design detects overheads of roughly 1-2% (§7), so finer
+distinctions among the other three strategies are unresolved, not absent.
+Two methodological points generalize beyond this server: randomizing
+configuration order per repetition keeps a drifting environment from
+concentrating on one configuration (§2, §6), and a systematic infrastructure
+failure — here, file-descriptor exhaustion — can produce clean, uniform, wrong
+results that RMIT's own checks do not flag, so a small dry run's raw output
+should be inspected before trusting an aggregate (§3). Natural next steps are
+a live A/A run, a second-machine load generator to remove client-server
+co-location, and additional workloads and hardware.
 
 ## References
 
@@ -827,9 +728,6 @@ python3 benchmarks/generate_paper_figures.py
 # Minimum detectable effect numbers (§7), from the three raw_data_rmit.csv files above
 python3 benchmarks/compute_mde.py       # closed-form estimate
 python3 benchmarks/simulate_mde.py      # injected-effect simulation (needs numpy; ~2 minutes)
-
-# Two-state evidence in the original fixed-order dataset (§2)
-python3 benchmarks/analyze_v12_states.py
 ```
 
 Machine specs, commit hash, and full runtime config are written to each

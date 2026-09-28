@@ -7,21 +7,18 @@ and how much that answer depends on benchmark design itself.
 
 ## TL;DR
 
-An earlier fixed-order benchmark (v5/v12, Apple M2) produced two throughput states
-(707 of 1,440 runs above 130,000 ops/s, 733 below; a 3.35x gap) that the run order
-confounded with the strategies — the no-metrics baseline was slower than an
-instrumented variant at 200 clients, and an identical-code rerun was 3.6x slower
-than the main run — so that dataset cannot rank the strategies. Repeating the
-comparison under **Randomized Multiple Interleaved Trials (RMIT)** — a technique
-proposed by Abedi, Heard & Brecht (2015) and shown necessary for cloud environments by
-[Abedi & Brecht, ICPE 2017](docs/paper_draft.md#1-motivation-and-related-work),
-not invented by this project — on three *other* machines (a Linux laptop and two Azure
-VMs) shows no two-state pattern (0 of 240 configurations flagged). Because the hardware
-and OS changed, that alone does not show RMIT removed the original pattern; an RMIT
-rerun on the original M2 is the missing test. On those machines every
-instrumentation strategy costs a small, consistent throughput overhead — **at most
-~2.3%** at any tested concurrency from 100 to 3000 clients — with ThreadLocal cheapest
-and Sharded-2key second on all three; the order of the other three varies by machine.
+This project measures the throughput cost of six per-command metrics strategies in a
+Rust Redis-compatible server using **Randomized Multiple Interleaved Trials (RMIT)** —
+a technique proposed by Abedi, Heard & Brecht (2015) and shown necessary for cloud
+environments by
+[Abedi & Brecht, ICPE 2017](docs/paper_draft.md#1-motivation-and-related-work), not
+invented by this project — on three machines: a Linux laptop and two dedicated Azure
+VMs (4,320 runs, 240 configurations, 25–3000 concurrent clients, three workload mixes).
+No two-state throughput pattern appears (0 of 240 configurations flagged) and run-to-run
+variability is low. Every strategy costs a small, consistent overhead — **at most ~2.3%**
+at any tested concurrency — with ThreadLocal cheapest and Sharded-2key second on all
+three machines; the order of the other three varies by machine, and the design resolves
+differences of roughly 1–2%, so smaller gaps are unresolved rather than absent.
 
 Full write-up, including related work and what this paper does and doesn't newly
 contribute: [docs/paper_draft.md](docs/paper_draft.md).
@@ -53,30 +50,22 @@ Three datasets, same design, different hardware and scope:
 | [experiment_results_rmit_azure](experiment_results_rmit_azure) | Azure `Standard_D4s_v6` (4 vCPU, 16GB) | 6 strategies × 8 concurrency (100–1000) | 1,440 | First clean-room run — VM dedicated solely to this benchmark |
 | [experiment_results_rmit_advanced](experiment_results_rmit_advanced) | Azure `Standard_D8s_v6` (8 vCPU, 32GB) | 6 strategies × 8 concurrency (100–3000) × 3 workloads | 2,160 | Adds read-heavy/write-heavy workloads and a 3× wider concurrency range |
 
-### No two-state pattern on the three RMIT machines
+### No two-state pattern
 
-The original v5/v12 runs (Apple M2) showed a split between "fast" and "slow" throughput
-states in 11 of 48 configurations. The RMIT bimodal detector
-(`benchmarks/analyze_rmit_results.py`) found **0 flagged configurations across all
-three RMIT datasets** (0 of 48 on the laptop, 0 of 48 on Azure D4s_v6, 0 of 144 on Azure
-D8s_v6 — 240 configurations total). As a positive control the same detector flags 8 of
-the 11 two-state configurations in the v12 data. **Caveat:** the RMIT machines differ
-from the original one (Linux/Azure vs. macOS/M2), so this absence is consistent with
-either "RMIT removed the pattern" or "the pattern was specific to the original machine";
-only an RMIT rerun on the M2 separates them (paper §5, §7).
+The RMIT two-state detector (`benchmarks/analyze_rmit_results.py`) found **0 flagged
+configurations across all three datasets** (0 of 48 on the laptop, 0 of 48 on Azure
+D4s_v6, 0 of 144 on Azure D8s_v6 — 240 configurations total). The detector is a simple
+largest-gap heuristic, so this rules out large, well-separated state splits but not
+subtler multimodality (paper §5).
 
-### Run-to-run variability on the RMIT machines
+### Run-to-run variability
 
 Relative 95% bootstrap CI width on throughput (CI width ÷ median):
 
-| | v12 (fixed order, M2) | RMIT laptop | RMIT Azure D4s_v6 | RMIT Azure D8s_v6 (advanced) |
-|---|---:|---:|---:|---:|
-| Mean | 0.176 (as CV) | 0.0129 | 0.0091 | 0.0177 |
-| Max | 0.698 (as CV) | 0.0386 | 0.0175 | 0.0420 |
-
-(v12's column is CV = stddev/mean, not CI width, and design, hardware, and OS all differ
-between the columns, so the gap is not attributable to the design alone. What it does show
-is that variability on the RMIT machines is low enough for the overhead comparison below.)
+| | Laptop | Azure D4s_v6 | Azure D8s_v6 (advanced) |
+|---|---:|---:|---:|
+| Mean | 0.0129 | 0.0091 | 0.0177 |
+| Max | 0.0386 | 0.0175 | 0.0420 |
 
 ### Instrumentation overhead: small, consistent, at most ~2.3%
 
@@ -208,11 +197,11 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
 - [docs/macos_m2_experiment_protocol.md](docs/macos_m2_experiment_protocol.md): superseded, kept for provenance (M2 hardware)
 - [docs/legacy_docs_archive.md](docs/legacy_docs_archive.md)
 
-## Legacy: v5/v12 (superseded fixed-order design)
+## Legacy: v5/v12 (Apple M2, fixed order — superseded, not part of the paper)
 
-Kept for provenance and as the "before" side of the before/after comparison above — not
-the current canonical result. v5 ran on Apple M2 hardware with only 4 of the current 6
-strategies (`Sharded-2key`, `Sharded-N`, and `HdrHistogram` were added later).
+Kept in the repository for provenance only; the paper and the results above use only the
+Linux laptop and Azure VM RMIT datasets. v5 ran on Apple M2 hardware with only 4 of the
+current 6 strategies (`Sharded-2key`, `Sharded-N`, and `HdrHistogram` were added later).
 
 | Strategy | Clients | Throughput Mean (ops/sec) | Throughput CV | p99 Mean (us) |
 |---|---:|---:|---:|---:|
@@ -225,8 +214,8 @@ strategies (`Sharded-2key`, `Sharded-N`, and `HdrHistogram` were added later).
 | ThreadLocal | 1000 | 28,568 | 0.079 | 269,401 |
 
 v12 (30 repetitions, fixed order, Apple M2) mean throughput CV across 48 configurations:
-**0.176**, max **0.698** — see [docs/paper_draft.md](docs/paper_draft.md) §2 for the full
-evidence this instability was a benchmark-design artifact, not a server property.
+**0.176**, max **0.698**. That dataset showed two throughput states that the fixed run
+order confounded with the strategies, so it cannot rank them; it is not used in the paper.
 
 - Full v5 report: [reports/final_experiment_v5.md](reports/final_experiment_v5.md)
 - Additional reports: [reports/final_experiment_report_enhanced.md](reports/final_experiment_report_enhanced.md), [reports/final_experiment_report.md](reports/final_experiment_report.md), [reports/final_experiment_details.md](reports/final_experiment_details.md)
