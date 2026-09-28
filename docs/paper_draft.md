@@ -49,6 +49,60 @@ tied-or-most expensive) hold across all three workload types — the choice
 of instrumentation strategy does not meaningfully interact with
 read/write mix.
 
+## Contributions
+
+Given the related work in §1 — Randomized Multiple Interleaved Trials
+(RMIT) is Abedi and Brecht's technique (2017), and Laaber et al. (2019)
+already apply RMIT with bootstrap confidence intervals to cloud
+benchmarking — this paper's contribution is specifically:
+
+1. **A live-server empirical result in a regime existing RMIT studies
+   don't cover.** Both Abedi and Brecht (2017) and Laaber et al. (2019)
+   apply RMIT to isolated units — cloud infrastructure micro-traces and
+   single-method JMH/Go microbenchmarks, respectively — run without real
+   concurrent client load. This paper applies the same rigor to a full
+   network client-server system under concurrent load up to 3000 clients
+   against 4-8 vCPUs (a thread-oversubscription regime with connection
+   setup, server restarts, and OS scheduler interaction that
+   method-level microbenchmarks don't exercise), replicated across three
+   independently-provisioned machines, to measure something no prior
+   RMIT study reports: the throughput/latency cost of six specific
+   command-metrics instrumentation strategies in an in-memory
+   Redis-compatible key-value store (§4, §4b).
+2. **A documented "clean but wrong" failure mode that RMIT's own
+   validity checks do not catch.** §3 reports a systematic,
+   order-independent file-descriptor exhaustion failure that produced
+   exactly `0 ops/sec` with `rc=0` and a validly-formed result across
+   every affected configuration — the opposite signature of the noisy,
+   bimodal instability RMIT's bimodality detector and tight CI width are
+   built to flag. Neither Abedi and Brecht (2017) nor Laaber et al.
+   (2019) report an analogous failure; we show concretely that passing
+   every one of RMIT's own validity checks (no bimodality, tight CIs) is
+   necessary but not sufficient for a result to be correct, and give
+   practitioners a specific signature to check for (suspiciously
+   *uniform*, *clean* values, verified by eye on a small dry run before
+   trusting an aggregate).
+3. **An explicit minimum-detectable-effect analysis for the RMIT paired
+   design.** §7 gives a reusable formula and worked numbers (roughly
+   0.9-2.1% depending on machine and repetition count) for exactly how
+   small an effect an RMIT paired-block comparison can detect at a given
+   sample size. Neither foundational RMIT paper reports this for its own
+   comparisons (Laaber et al. report an empirical ~10% detectable
+   slowdown for their cross-instance design, which answers a related but
+   different question). This lets §4b's "no significant crossover"
+   findings be read with an explicit detection floor instead of an
+   implicit, unstated one.
+4. **A three-independent-dataset replication check that separates real
+   findings from single-dataset noise.** Most single-study benchmarking
+   papers, including both RMIT papers above, report one dataset (or
+   several environments compared as the object of study, not as
+   replicates of the same comparison). Because this paper collected
+   three independent replicates of the *same* six-strategy comparison, §4b
+   can distinguish what replicates (thread_local ranks 1st and
+   sharded_2key ranks 2nd in all three) from what doesn't (the exact
+   ordering of the remaining three strategies, and the crossover events) —
+   a check most single-dataset studies structurally cannot perform.
+
 ## 1. Motivation and Related Work
 
 Observability (per-command metrics/counters) is not free; the
@@ -182,6 +236,18 @@ than glossed over:
   `hdr_histogram` metrics strategy; included for completeness since it is
   referenced by name throughout §3-§7, not because it is a peer-reviewed
   source.
+- **Fruth, M., Scherzinger, S., Mauerer, W., and Ramsauer, R. (2021).
+  "Tell-Tale Tail Latencies: Pitfalls and Perils in Database
+  Benchmarking." TPCTC 2021.** The closest database-benchmarking-specific
+  methodology paper found in this search: shows that Java-based database
+  benchmarking harnesses (as used by standard benchmarks like TPC-X and
+  YCSB) systematically distort measured tail latencies, a different
+  confound than this paper's run-order problem (§2) but the same
+  underlying lesson — a benchmark harness's own implementation details
+  can be the dominant source of a measured effect, not the system under
+  test. Cited here specifically because it is KV-store/database-adjacent
+  benchmarking-methodology literature, which §7 notes this paper's
+  related-work search otherwise found little of.
 
 **What this leaves for this paper to contribute**, given the above: not
 the RMIT technique itself (Abedi and Brecht, 2017), not the general
@@ -541,12 +607,12 @@ per-sample output by eye before trusting an aggregate.
 ## 7. Limitations
 
 - §1's related-work discussion, while covering the closest prior
-  methodology papers found (Abedi and Brecht, 2017; Laaber et al., 2019)
-  and the relevant concurrency/observability background, is not a
-  systematic literature review; a venue-specific submission should widen
-  this search (e.g., database- and KV-store-specific benchmarking
-  methodology, which this pass did not find a close match for beyond the
-  general cloud/microbenchmarking literature cited).
+  methodology papers found (Abedi and Brecht, 2017; Laaber et al., 2019;
+  Fruth et al., 2021 for the database-benchmarking angle specifically),
+  is not a systematic literature review; a venue-specific submission
+  should widen this search further, particularly for KV-store- and
+  NoSQL-specific throughput/instrumentation studies (e.g. YCSB-based
+  comparisons), which this pass surveyed only briefly.
 - The laptop run had an active development session sharing its 4 threads
   throughout (see caveat in `experiment_results_rmit/metadata_rmit.json`);
   the cloud VM run does not have this confound and should be treated as

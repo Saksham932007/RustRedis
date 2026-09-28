@@ -9,16 +9,20 @@ and how much that answer depends on benchmark design itself.
 
 An earlier fixed-order benchmark design (v5/v12) reported throughput coefficients of
 variation up to **0.70** and unexplained bimodal "fast/slow" states. Redesigning the
-experiment as **Randomized Multiple Interleaved Trials (RMIT)** — shuffling run order
-per repetition instead of grouping by strategy — and rerunning across three independent
-machines (a laptop and two cloud VMs) **eliminated the bimodal pattern entirely** (0 of
+experiment around **Randomized Multiple Interleaved Trials (RMIT)** — a technique
+defined by [Abedi & Brecht, ICPE 2017](docs/paper_draft.md#1-motivation-and-related-work)
+for exactly this class of problem, not invented by this project — shuffling run order
+per repetition instead of grouping by strategy, and rerunning across three independent
+machines (a laptop and two cloud VMs), **eliminated the bimodal pattern entirely** (0 of
 240 configurations flagged as two-state, across all three datasets) and cut relative
 variability by roughly an order of magnitude. Under the corrected design, every
 instrumentation strategy costs a small, consistent throughput overhead — **never more
-than 2.3%**, holding steady from 100 to 3000 concurrent clients and identically ranked
+than 2.3%**, holding steady from 100 to 3000 concurrent clients, with the top and bottom
+of the per-strategy ranking (thread_local cheapest, sharded_n tied-or-highest) holding
 across mixed/read-heavy/write-heavy workloads.
 
-Full write-up: [docs/paper_draft.md](docs/paper_draft.md).
+Full write-up, including related work and what this paper does and doesn't newly
+contribute: [docs/paper_draft.md](docs/paper_draft.md).
 
 ## What is being compared
 
@@ -91,8 +95,11 @@ holds up against measurement noise (see below).
 ### Workload type doesn't change which strategy is cheapest
 
 The advanced dataset adds read-heavy (80/20) and write-heavy (20/80) workloads
-alongside the standard 50/50 mixed workload. Overhead ranking is **identical** across
-all three:
+alongside the standard 50/50 mixed workload. ThreadLocal is cheapest and Sharded-2key
+second-cheapest in all three; Sharded-N is clearly most expensive in read-heavy and
+write-heavy, and is a statistical tie with GlobalMutex for most expensive in mixed
+(1.73% vs. 1.74% — below this design's minimum detectable effect, see
+[docs/paper_draft.md §7](docs/paper_draft.md#7-limitations)):
 
 | Strategy | Mixed | Read-heavy | Write-heavy |
 |---|---:|---:|---:|
