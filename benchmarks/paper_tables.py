@@ -16,7 +16,6 @@ from statistics import mean
 
 ROOT = Path(__file__).resolve().parent.parent
 DATASETS = [
-    ("laptop", "experiment_results_rmit"),
     ("azure_d4s_v6", "experiment_results_rmit_azure"),
     ("azure_d8s_v6_advanced", "experiment_results_rmit_advanced"),
 ]

@@ -12,14 +12,13 @@ Rust Redis-compatible server using **Randomized Multiple Interleaved Trials (RMI
 a technique proposed by Abedi, Heard & Brecht (2015) and shown necessary for cloud
 environments by
 [Abedi & Brecht, ICPE 2017](docs/paper_draft.md#1-motivation-and-related-work), not
-invented by this project — on three machines: a Linux laptop and two dedicated Azure
-VMs (4,320 runs, 240 configurations, 25–3000 concurrent clients, three workload mixes).
-No two-state throughput pattern appears (0 of 240 configurations flagged) and run-to-run
-variability is low. Every strategy costs a small, consistent overhead — **at most ~2.6%**
-at any concurrency of 50 or more clients (workload-averaged; the laptop's noisier
-25-client cells reach 4.3%) — with ThreadLocal cheapest and Sharded-2key second on all
-three machines; the order of the other three varies by machine, and the design resolves
-differences of roughly 1–2%, so smaller gaps are unresolved rather than absent.
+invented by this project — on two dedicated Azure VMs (3,600 runs, 192 configurations,
+100–3000 concurrent clients, three workload mixes). No two-state throughput pattern
+appears (0 of 192 configurations flagged) and run-to-run variability is low. Every
+strategy costs a small, consistent overhead — **at most ~2.3%** at any concurrency level
+(workload-averaged; single concurrency-by-workload cells reach 3.2%) — with ThreadLocal
+cheapest, Sharded-2key second, and Sharded-N costliest on average on both VMs; the design
+resolves differences of roughly 1–2%, so smaller gaps are unresolved rather than absent.
 
 Full write-up, including related work and what this paper does and doesn't newly
 contribute: [docs/paper_draft.md](docs/paper_draft.md).
@@ -43,19 +42,19 @@ something else changing between runs.
 
 ## RMIT results (current)
 
-Three datasets, same design, different hardware and scope:
+Two datasets, same design, different VM size and scope (a third, laptop dataset,
+`experiment_results_rmit/`, remains in the repository but is not part of the paper):
 
 | Dataset | Hardware | Matrix | Runs | Notes |
 |---|---|---|---:|---|
-| [experiment_results_rmit](experiment_results_rmit) | Intel i3-10110U laptop (2C/4T, 8GB) | 6 strategies × 8 concurrency (25–500) | 720 | A dev session ran alongside this one — see caveat below |
 | [experiment_results_rmit_azure](experiment_results_rmit_azure) | Azure `Standard_D4s_v6` (4 vCPU, 16GB) | 6 strategies × 8 concurrency (100–1000) | 1,440 | First clean-room run — VM dedicated solely to this benchmark |
 | [experiment_results_rmit_advanced](experiment_results_rmit_advanced) | Azure `Standard_D8s_v6` (8 vCPU, 32GB) | 6 strategies × 8 concurrency (100–3000) × 3 workloads | 2,160 | Adds read-heavy/write-heavy workloads and a 3× wider concurrency range |
 
 ### No two-state pattern
 
 The RMIT two-state detector (`benchmarks/analyze_rmit_results.py`) found **0 flagged
-configurations across all three datasets** (0 of 48 on the laptop, 0 of 48 on Azure
-D4s_v6, 0 of 144 on Azure D8s_v6 — 240 configurations total). The detector is a simple
+configurations across both datasets** (0 of 48 on Azure D4s_v6, 0 of 144 on Azure
+D8s_v6 — 192 configurations total). The detector is a simple
 largest-gap heuristic, so this rules out large, well-separated state splits but not
 subtler multimodality (paper §5).
 
@@ -63,32 +62,31 @@ subtler multimodality (paper §5).
 
 Relative 95% bootstrap CI width on throughput (CI width ÷ median):
 
-| | Laptop | Azure D4s_v6 | Azure D8s_v6 (advanced) |
-|---|---:|---:|---:|
-| Mean | 0.0129 | 0.0091 | 0.0177 |
-| Max | 0.0386 | 0.0175 | 0.0420 |
+| | Azure D4s_v6 | Azure D8s_v6 (advanced) |
+|---|---:|---:|
+| Mean | 0.0091 | 0.0177 |
+| Max | 0.0175 | 0.0420 |
 
-### Instrumentation overhead: small and consistent, at most ~2.6% from 50 clients up
+### Instrumentation overhead: small and consistent, at most ~2.3% (workload-averaged)
 
 Mean throughput overhead vs. `disabled`, paired within the same RMIT repetition block
 (the valid RMIT comparison — every strategy in a block saw the same machine-state
 conditions):
 
-| Strategy | Laptop | Azure D4s_v6 | Azure D8s_v6 (advanced) |
-|---|---:|---:|---:|
-| ThreadLocal | 0.99% | 0.56% | 0.52% |
-| Sharded-2key | 1.15% | 0.85% | 0.94% |
-| GlobalMutex | 1.36% | 0.99% | 1.64% |
-| HdrHistogram | 2.14% | 1.42% | 1.53% |
-| Sharded-N | 1.97% | 1.60% | 1.98% |
+| Strategy | Azure D4s_v6 | Azure D8s_v6 (advanced) |
+|---|---:|---:|
+| ThreadLocal | 0.56% | 0.52% |
+| Sharded-2key | 0.85% | 0.94% |
+| GlobalMutex | 0.99% | 1.64% |
+| HdrHistogram | 1.42% | 1.53% |
+| Sharded-N | 1.60% | 1.98% |
 
-`ThreadLocal` is the cheapest strategy and `Sharded-2key` the second-cheapest on every
-machine; the order of the other three (`GlobalMutex`, `HdrHistogram`, `Sharded-N`)
-changes from machine to machine and is not claimed to be resolved (see the paper's §4b
-and §7). No strategy exceeds ~2.6% overhead at any concurrency level of 50 or more
-(workload-averaged; single concurrency-by-workload cells reach 3.2%, and the laptop's
-25-client cells reach 4.3%), and the ranking never crosses over in a way that holds up
-against measurement noise (see below).
+`ThreadLocal` is the cheapest strategy, `Sharded-2key` the second-cheapest, and
+`Sharded-N` the costliest on average on both VMs; `GlobalMutex` and `HdrHistogram` swap
+places and are not claimed to be resolved from each other (see the paper's §4b and §7).
+No strategy exceeds ~2.3% overhead at any concurrency level (workload-averaged; single
+concurrency-by-workload cells reach 3.2%), and the ranking never crosses over in a way
+that holds up against measurement noise (see below).
 
 ### Workload type doesn't change which strategy is cheapest
 
@@ -142,10 +140,9 @@ concurrency being tested, so every client connection failed silently. Fixed in
 
 ### Caveats
 
-- The laptop run had an active development session sharing its 4 threads throughout
-  (see `experiment_results_rmit/metadata_rmit.json`); the Azure runs don't have this
-  confound and should be treated as primary where they disagree (in practice they agree
-  closely).
+- Both datasets are Azure VMs of the same family and region, so they replicate the
+  comparison across VM size and workload coverage but not across clouds or hardware
+  families.
 - Client and server always share the same machine — at the highest concurrency levels
   this is a genuine thread-oversubscription stress test, not an isolated server
   measurement.
@@ -166,8 +163,8 @@ cargo build --release --manifest-path benchmarks/Cargo.toml
 ### 2. Run the RMIT experiment
 
 ```bash
-python3 benchmarks/run_rmit_experiment.py --output-dir experiment_results_rmit
-python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit/raw_data_rmit.csv
+python3 benchmarks/run_rmit_experiment.py --output-dir experiment_results_rmit_local
+python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit_local/raw_data_rmit.csv
 ```
 
 Read [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md) first — it has

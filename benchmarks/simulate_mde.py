@@ -25,7 +25,6 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 DATASETS = [
-    ("laptop", "experiment_results_rmit/raw_data_rmit.csv"),
     ("azure_d4s_v6", "experiment_results_rmit_azure/raw_data_rmit.csv"),
     ("azure_d8s_v6_advanced", "experiment_results_rmit_advanced/raw_data_rmit.csv"),
 ]

@@ -4,7 +4,7 @@
 Figure 1: overhead % vs concurrency, 5 strategies, advanced dataset
 (averaged over the 3 workloads at each concurrency level) -> figures/fig1_overhead_vs_concurrency.png
 
-Figure 2: overhead % by strategy, grouped by dataset (laptop / Azure D4s_v6 /
+Figure 2: overhead % by strategy, grouped by dataset (Azure D4s_v6 /
 Azure D8s_v6 advanced) -> figures/fig2_cross_dataset_ranking.png
 
 Every number plotted here is recomputed from raw_data_rmit.csv / rmit_analysis.json,
@@ -139,7 +139,6 @@ def figure1_overhead_vs_concurrency() -> None:
 
 def figure2_cross_dataset_ranking() -> None:
     datasets = [
-        ("Laptop\n(i3-10110U)", "experiment_results_rmit/rmit_analysis.json"),
         ("Azure D4s_v6", "experiment_results_rmit_azure/rmit_analysis.json"),
         ("Azure D8s_v6\n(advanced)", "experiment_results_rmit_advanced/rmit_analysis.json"),
     ]
@@ -176,8 +175,8 @@ def figure2_cross_dataset_ranking() -> None:
     ax.set_xticklabels([label for label, _ in datasets])
     ax.set_ylabel("Mean overhead vs. disabled (%)")
     ax.set_title(
-        "thread_local ranks cheapest and sharded_2key ranks 2nd in all three\n"
-        "independent datasets; ranks 3-5 reshuffle between machines",
+        "thread_local is cheapest, sharded_2key second, and sharded_n most expensive\n"
+        "on both Azure VMs; global_mutex and hdr_histogram swap ranks 3-4",
         fontsize=10.5,
     )
     ax.spines["top"].set_visible(False)

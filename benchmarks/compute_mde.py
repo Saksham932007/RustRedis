@@ -24,7 +24,6 @@ Z_ALPHA_2 = 1.96
 Z_POWER = 0.84
 
 DATASETS = [
-    ("laptop", "experiment_results_rmit/raw_data_rmit.csv"),
     ("azure_d4s_v6", "experiment_results_rmit_azure/raw_data_rmit.csv"),
     ("azure_d8s_v6_advanced", "experiment_results_rmit_advanced/raw_data_rmit.csv"),
 ]

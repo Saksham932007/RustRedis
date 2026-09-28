@@ -1,7 +1,7 @@
 # Observability Overhead Under Concurrency in an In-Memory Key-Value Store: An RMIT Measurement Study
 
-*Draft. Experiments are complete: 4,320 RMIT runs on a Linux laptop and two
-dedicated Azure VMs. Every table value, figure, and quoted statistic in §4-§7
+*Draft. Experiments are complete: 3,600 RMIT runs on two dedicated Azure
+VMs. Every table value, figure, and quoted statistic in §4-§7
 regenerates from committed scripts (`benchmarks/paper_tables.py`,
 `generate_paper_figures.py`, `compute_mde.py`, `simulate_mde.py`; see the
 Appendix); citations and page ranges have been checked.
@@ -22,16 +22,16 @@ comparing strategies in blocks would confound strategy with machine state
 Trials (RMIT; Abedi, Heard, and Brecht, 2015), which shuffles the order of
 every (strategy, concurrency, workload) configuration within each repetition,
 with per-run machine-state logging and a paired within-block comparison
-against a no-metrics baseline. We run it on three machines — a 4-thread Linux
-laptop and dedicated 4- and 8-vCPU Azure VMs — for 4,320 runs across 240
-configurations, 25 to 3000 concurrent clients, and mixed, read-heavy, and
-write-heavy workloads. No two-state throughput pattern appears in any
-configuration (0 of 240 flagged), and mean relative 95% CI width is 0.9%-1.8%.
-Every strategy costs 0.5%-2.1% throughput on average and at most 2.6% at any
-concurrency of 50 or more clients (workload-averaged; the laptop's noisier
-25-client cells reach 4.3%). ThreadLocal is cheapest and Sharded-2key second on
-all three machines; the order of the remaining three strategies varies by
-machine. A detectable-effect analysis (closed-form and injected-effect
+against a no-metrics baseline. We run it on two dedicated Azure VMs (4 and 8
+vCPUs, same region) for 3,600 runs across 192 configurations, 100 to 3000
+concurrent clients, and mixed, read-heavy, and write-heavy workloads. No
+two-state throughput pattern appears in any configuration (0 of 192 flagged),
+and mean relative 95% CI width is 0.9%-1.8%. Every strategy costs 0.5%-2.0%
+throughput on average and at most 2.31% at any concurrency level
+(workload-averaged; single concurrency-by-workload cells reach 3.2%).
+ThreadLocal is cheapest, Sharded-2key second, and Sharded-N most expensive on
+average on both VMs; GlobalMutex and HdrHistogram swap places. A
+detectable-effect analysis (closed-form and injected-effect
 simulation) puts the design's resolution at roughly 1-2% depending on the
 dataset, so smaller differences between adjacent strategies are unresolved
 rather than absent. We also document a failure that RMIT's own validity
@@ -51,9 +51,10 @@ that frame, this paper contributes:
    collected by others, and Laaber et al. (2019) study single-method
    microbenchmarks and explicitly make no claims about load or stress tests.
    This paper applies RMIT to a network server under up to 3000 concurrent
-   clients on 4-8 vCPUs, across three machines, and reports the overhead of six
-   strategies (at most 2.6% at 50 or more clients) and which parts of their
-   ranking replicate across machines (ThreadLocal first, Sharded-2key second).
+   clients on 4-8 vCPUs, on two Azure VMs, and reports the overhead of six
+   strategies (at most 2.31% per concurrency level, workload-averaged) and which
+   parts of their ranking replicate across the two VMs (ThreadLocal first,
+   Sharded-2key second, Sharded-N last).
 2. **A "clean but wrong" failure that RMIT's own checks do not catch (§3).**
    File-descriptor exhaustion produced exactly `0 ops/sec` with `rc=0` and a
    validly-formed result in every affected configuration — the opposite of
@@ -64,8 +65,8 @@ that frame, this paper contributes:
    closed-form paired-design estimate and by an injected-effect simulation on
    each dataset's own noise (following the injected-slowdown procedure of
    Laaber et al., 2019, adapted to within-machine paired blocks), the design
-   detects overheads of roughly 1-2% at 80% power, with a 4-6% false-positive
-   rate in the simulated null. The method is not new; it is reported so that
+   detects overheads of roughly 1-2% at 80% power, with a 5%-6% false-positive
+   rate in the simulated null (§7). The method is not new; it is reported so that
    "no significant difference" statements carry an explicit resolution floor.
 
 ## 1. Motivation and Related Work
@@ -188,14 +189,8 @@ cloud microbenchmarking). This project's specific application:
   (`benchmarks/system_state.py`): CPU frequency, thermal-zone temperature,
   memory/swap, load average, AC/battery status (fields degrade to `null`
   when unavailable, e.g. no thermal sensors or battery on a cloud VM).
-- Three hardware targets, chosen to check that the overhead results are not
-  specific to one machine:
-  - **Laptop**: Intel i3-10110U (2C/4T), 8GB DDR4, Linux. 6 strategies x
-    8 concurrency levels (25-500) x 15 repetitions = 720 runs. An active
-    development session was running on this machine throughout (recorded
-    as a caveat in `experiment_results_rmit/metadata_rmit.json`), so the
-    1-minute load average during runs had a median of 9.3 (range 3.7-26.6)
-    on a 4-thread CPU.
+- Two hardware targets (both Azure, same region and VM family), chosen to
+  check that the overhead results are not specific to one VM size:
   - **Cloud VM (v1)**: Azure `Standard_D4s_v6` (4 vCPU, 16GB RAM, Central
     India), provisioned solely for the run and deleted immediately after.
     6 strategies x 8 concurrency levels (100-1000) x 30 repetitions =
@@ -231,30 +226,22 @@ inspecting raw per-run output before trusting an aggregate.
 
 ## 4. Results on the RMIT Machines
 
-Both datasets and their analysis are in the repo:
-`experiment_results_rmit/` (laptop) and `experiment_results_rmit_azure/`
-(cloud VM), each with `raw_data_rmit.csv`, `rmit_analysis.json`,
-`rmit_analysis_summary.csv`, and `metadata_rmit.json`.
+The Azure D4s_v6 dataset and its analysis are in the repo:
+`experiment_results_rmit_azure/`, with `raw_data_rmit.csv`,
+`rmit_analysis.json`, `rmit_analysis_summary.csv`, and `metadata_rmit.json`.
 
-**No two-state pattern on either machine.** `benchmarks/analyze_rmit_results.py`
+**No two-state pattern.** `benchmarks/analyze_rmit_results.py`
 flags a configuration as two-state when its throughput distribution
 splits into two clusters at least 1.8x apart with each holding >=15% of
-samples. Result: **0 of 48 configurations flagged on the laptop, 0 of 48
-on the cloud VM.** The detector is a simple largest-gap heuristic (§5), so
-this rules out large, well-separated state splits but not subtler
-multimodality.
+samples. Result: **0 of 48 configurations flagged.** The detector is a
+simple largest-gap heuristic (§5), so this rules out large, well-separated
+state splits but not subtler multimodality.
 
 **Run-to-run variability is low.** Relative 95% bootstrap CI width on
-throughput (width / median):
-
-| | RMIT laptop (Linux) | RMIT cloud VM (Azure D4s_v6) |
-|---|---:|---:|
-| Mean across 48 configs | 0.0129 | 0.0091 |
-| Max across 48 configs | 0.0386 | 0.0175 |
-
-Variability this small (mean relative CI width 0.9%-1.8% across all three
-datasets; §4b adds the third) is what makes the sub-2% overhead comparisons
-below meaningful.
+throughput (width / median): mean 0.0091 and maximum 0.0175 across the 48
+configurations. Variability this small (mean relative CI width 0.9%-1.8%
+across both datasets; §4b adds D8s_v6) is what makes the sub-2% overhead
+comparisons below meaningful.
 
 **Instrumentation overhead is small, consistent, and doesn't cross over.**
 Paired within-repetition-block throughput ratios vs. the `disabled`
@@ -266,38 +253,28 @@ are this project's primary point estimate throughout, per
 `benchmarks/analyze_rmit_results.py`); "mean overhead" in every table below
 is the arithmetic mean of those per-cell medians across cells:
 
-| Strategy | Laptop mean overhead | Cloud VM mean overhead |
-|---|---:|---:|
-| thread_local | 0.99% | 0.56% |
-| sharded_2key | 1.15% | 0.85% |
-| global_mutex | 1.36% | 0.99% |
-| sharded_n | 1.97% | 1.60% |
-| hdr_histogram | 2.14% | 1.42% |
+| Strategy | Azure D4s_v6 mean overhead |
+|---|---:|
+| thread_local | 0.56% |
+| sharded_2key | 0.85% |
+| global_mutex | 0.99% |
+| hdr_histogram | 1.42% |
+| sharded_n | 1.60% |
 
-`thread_local` is cheapest on both machines, but the *most* expensive slot
-is not identical: `hdr_histogram` is highest on the laptop (2.14%) while
-`sharded_n` is highest on the cloud VM (1.60% vs. `hdr_histogram`'s 1.42%)
-— the two swap places at the bottom of the ranking (see §4b for the full
-three-dataset cross-check of which parts of this ranking replicate and
-which don't). Overhead is small on both machines regardless (strategy
-means at most 2.14%), and the cloud VM's numbers are uniformly a bit lower
-than the laptop's — consistent with the laptop dataset carrying some
-contention from the development session sharing its 4 threads, rather than
-any strategy behaving qualitatively differently between machines. Per-cell
-median paired ratios ranged from 0.9573 to 0.9973 (laptop) and 0.9771 to
-1.0051 (cloud VM) — the one cell slightly above 1.0 is noise (a strategy
-edging out `disabled` in that cell), not a reversal of the overall ranking.
-The largest single-cell overhead is the laptop's 4.27% (`hdr_histogram` at 25
-clients, where every strategy except `sharded_2key` is at or above 2.3%); from
-50 clients up the laptop's maximum is 2.59% (`sharded_n` at 400), and Azure
-D4s_v6's is 2.29% (`sharded_n` at 600).
+`thread_local` is cheapest and `sharded_n` most expensive on average, with
+`sharded_2key` second (see §4b for the D8s_v6 counterpart and which parts of
+the ranking replicate across the two VMs). Overhead is small (strategy means
+at most 1.60%). Per-cell median paired ratios ranged from 0.9771 to 1.0051 —
+the one cell slightly above 1.0 is noise (a strategy edging out `disabled` in
+that cell), not a reversal of the overall ranking. The largest single-cell
+overhead is 2.29% (`sharded_n` at 600 clients).
 
 ## 4b. Extending the Design: Workload Type and Higher Concurrency
 
-The two datasets in §4 only exercise the 50/50 mixed workload and top out
-at 1000 concurrent clients. Neither found where (or whether) strategies
-actually diverge, and neither tested whether read/write mix interacts
-with instrumentation cost. `experiment_results_rmit_advanced/` (Azure
+The dataset in §4 only exercises the 50/50 mixed workload and tops out at
+1000 concurrent clients. It did not find where (or whether) strategies
+actually diverge, and did not test whether read/write mix interacts with
+instrumentation cost. `experiment_results_rmit_advanced/` (Azure
 `Standard_D8s_v6`) closes both gaps: 6 strategies x 8 concurrency levels
 (100-3000) x 3 workloads (mixed, read-heavy, write-heavy) x 15
 repetitions = 2160 runs.
@@ -305,8 +282,7 @@ repetitions = 2160 runs.
 **Still no two-state pattern, at 3x the concurrency ceiling and 3x the
 workload coverage.** 0 of 144 configurations flagged two-state. Mean
 relative 95% CI width: 0.0177 (max 0.0420) — slightly wider than the
-smaller cloud-VM run (0.0091), consistent with 15 repetitions vs 30, and
-still small.
+D4s_v6 run (0.0091), consistent with 15 repetitions vs 30, and still small.
 
 **Overhead stays small and flat all the way to c=3000** — there is no
 concurrency level where any strategy's cost jumps or the ranking
@@ -388,53 +364,48 @@ supports detecting a real one, but the correct reading of this specific
 dataset is "no meaningful crossover found" — overhead is flat and small
 across the entire tested range.
 
-**The top of the ranking is not noise, even though most adjacent gaps
-are.** It's worth being precise about which parts of "no significant
-difference" actually mean "we detected no difference" versus "any
-difference here is too small for this design to see" (see the
-minimum-detectable-effect numbers in §7). Ranking all six strategies by
-mean overhead within each of the three independent datasets — laptop,
-Azure D4s_v6, and Azure D8s_v6 (§4's table and this section's workload
-table) — gives:
+**Which parts of the ranking are consistent across the two VMs.** It's worth
+being precise about which parts of "no significant difference" actually mean
+"we detected no difference" versus "any difference here is too small for this
+design to see" (see the minimum-detectable-effect numbers in §7). Ranking all
+six strategies by mean overhead within each dataset (§4's table and this
+section's workload table) gives:
 
-| Rank | Laptop | Azure D4s_v6 | Azure D8s_v6 (advanced) |
-|---:|---|---|---|
-| 1 (cheapest) | thread_local | thread_local | thread_local |
-| 2 | sharded_2key | sharded_2key | sharded_2key |
-| 3 | global_mutex | global_mutex | hdr_histogram |
-| 4 | sharded_n | hdr_histogram | global_mutex |
-| 5 (most expensive) | hdr_histogram | sharded_n | sharded_n |
+| Rank | Azure D4s_v6 | Azure D8s_v6 (advanced) |
+|---:|---|---|
+| 1 (cheapest) | thread_local | thread_local |
+| 2 | sharded_2key | sharded_2key |
+| 3 | global_mutex | hdr_histogram |
+| 4 | hdr_histogram | global_mutex |
+| 5 (most expensive) | sharded_n | sharded_n |
 
 ![Mean overhead by strategy, grouped by dataset](../figures/fig2_cross_dataset_ranking.png)
 
 **Figure 2.** The same ranking as a chart: `thread_local` (leftmost bar in
-every group) and `sharded_2key` (second) hold their positions across all
-three independently-provisioned machines; `global_mutex`, `hdr_histogram`,
-and `sharded_n` reorder between groups. Generated by
+each group), `sharded_2key` (second), and `sharded_n` (rightmost) hold their
+positions on both VMs; `global_mutex` and `hdr_histogram` swap. Generated by
 `benchmarks/generate_paper_figures.py` from each dataset's own
 `rmit_analysis.json`, using the same per-cell ratio-median statistic as
 every table in §4 and §4b (verified to reproduce those tables' values
 exactly before this script was trusted for the figure).
 
-`thread_local` takes rank 1 and `sharded_2key` takes rank 2 in all three
-independently-provisioned datasets — that part of the ranking is stable.
-Ranks 3-4 reshuffle between datasets (`global_mutex` and `hdr_histogram`
-trade places), and `sharded_n` is in the bottom two everywhere but is not
-always dead last. No single adjacent-strategy gap in any one dataset
-clears that dataset's minimum detectable effect, so none of this is a
-"statistically significant" pairwise claim in any single run. But three
-independently-provisioned machines agreeing on which strategy takes rank 1
-and which takes rank 2 is not the behavior pure per-run noise would
-produce — noise would put a different strategy on top in each dataset
-about as often as not. We read the rank-1/rank-2 finding as a small,
-consistent effect (plausibly because per-thread accumulation and a two-entry
-concurrent map avoid synchronization or per-key bookkeeping cost that the
-other three pay; we did not test the mechanism), distinct from both the crossover claims
-above (which really are noise) and the ranks-3-through-5 reshuffling
-(which is also most plausibly noise, since it doesn't replicate in a
-fixed order across datasets). A crossover, and a rank-3-vs-4 swap, are
-each single-dataset events with no cross-dataset replication behind them;
-the rank-1/rank-2 finding replicates three times independently.
+`thread_local` takes rank 1, `sharded_2key` rank 2, and `sharded_n` rank 5 on
+both VMs; ranks 3-4 (`global_mutex` and `hdr_histogram`) trade places. No
+single adjacent-strategy gap in either dataset clears that dataset's minimum
+detectable effect, so none of this is a "statistically significant" pairwise
+claim in any single run. But two datasets agreeing on which strategy is
+cheapest, which is second, and which is costliest is not what pure per-run
+noise would tend to produce — with six strategies, the chance that two
+noise-only rankings agree on the top two in order is about 1 in 30. We read
+this as a small, consistent effect (plausibly because per-thread accumulation
+and a two-entry concurrent map avoid synchronization or per-key bookkeeping
+cost that the other strategies pay; we did not test the mechanism), distinct
+from the crossover claims above (which really are noise) and from the rank-3
+versus rank-4 swap (which is also most plausibly noise, since it does not
+replicate). The caveat is that the two VMs are the same VM family, region, OS,
+and benchmark build, differing in size and workload coverage, so they are
+replicates of the comparison but not independent tests across hardware
+families or clouds (§7).
 
 ## 5. Machine-State Logging and What It Can Check
 
@@ -444,18 +415,16 @@ CPU frequency, governor, thermal-zone temperature, memory and swap
 availability, 1/5/15-minute load average, and AC/battery status (fields are
 `null` where the hardware lacks them, e.g. thermal sensors and batteries on
 the Azure VMs). These logs allow post-hoc checks that a run was not
-disturbed — for example, the laptop's development session kept its 1-minute
-load average at a median of 9.3 (range 3.7-26.6) on a 4-thread CPU, which is
-recorded rather than hidden (§7). Load averages on the dedicated Azure VMs are
-also high (medians 8.5 and 14.6), but there they largely reflect the
+disturbed. Load averages on the dedicated Azure VMs are high (1-minute
+medians 8.5 on D4s_v6 and 14.6 on D8s_v6), but there they largely reflect the
 benchmark's own hundreds to thousands of client threads rather than outside
 interference.
 
 The two-state check in `benchmarks/analyze_rmit_results.py` is a deliberately
 simple heuristic: split each configuration's throughputs at their largest gap
 and flag it if the two clusters' medians are at least 1.8x apart and each
-holds at least 15% of the samples. It flagged 0 of 240 configurations (0 of 48
-on the laptop, 0 of 48 on Azure D4s_v6, 0 of 144 on Azure D8s_v6). Because it
+holds at least 15% of the samples. It flagged 0 of 192 configurations (0 of 48
+on Azure D4s_v6, 0 of 144 on Azure D8s_v6). Because it
 is a largest-gap heuristic rather than a mixture-model fit, it could miss
 subtler multimodality or state shifts smaller than 1.8x; the paired
 within-block design does not depend on it, since it compares strategies
@@ -470,28 +439,27 @@ Two audiences can act on this work directly.
 
 **For anyone choosing a metrics-collection strategy for a similar
 concurrent server:** the overhead of per-command observability here is
-small enough (at most 2.6% at any concurrency of 50 or more clients,
-workload-averaged, on every machine; single cells reach 3.2%) that "does
-instrumentation cost too much" is
-not, by itself, a reason to leave it disabled in production for a system
+small enough (at most 2.31% at any concurrency level, workload-averaged, on
+both VMs; single cells reach 3.2%) that "does instrumentation cost too much"
+is not, by itself, a reason to leave it disabled in production for a system
 in this class (single-process, in-memory, network-bound). Within that
 small budget, the choice of *strategy* still matters in a stable way:
-`thread_local` accumulation is the cheapest strategy on every machine we
+`thread_local` accumulation is the cheapest strategy on both VMs we
 tested and is the safe default when overhead must be minimized; if
 per-command latency histograms (not just counters) are required,
-`hdr_histogram` costs more but the extra cost (roughly 1.4-2.1
-percentage points versus `disabled`, depending on machine) buys detailed
+`hdr_histogram` costs more but the extra cost (roughly 1.4-1.5
+percentage points versus `disabled` on average) buys detailed
 tail-latency visibility that flat counters cannot provide, so it is a
 reasonable trade rather than a strategy to avoid. `sharded_n` — a
 concurrent map keyed by the full logical (data) key, so it holds one entry
 per distinct key (up to 10,000 in this workload) — showed no throughput
 advantage over a plain `global_mutex` at the concurrency levels tested
-(4-8 vCPUs, up to 3000 clients) and was in the bottom two on every machine;
-the extra cost of per-key entries is not paying for itself here, though we
+(4-8 vCPUs, up to 3000 clients) and had the highest mean overhead on both
+VMs; the extra cost of per-key entries is not paying for itself here, though we
 did not test why, and it would only be worth revisiting at core counts or
 contention levels well beyond what this project tested (see §7's scope
 limits). `sharded_2key`, by contrast, is keyed by command name (two entries,
-GET and SET) and was second-cheapest on every machine.
+GET and SET) and was second-cheapest on both VMs.
 
 **For anyone designing a similar concurrency benchmark:** the more
 general and arguably more durable finding is methodological, not about
@@ -550,11 +518,6 @@ per-sample output by eye before trusting an aggregate.
   overhead ratios (§4, §4b) are unaffected by this since they compare
   this project's own strategies against its own `disabled` baseline using
   the same client.
-- The laptop run had an active development session sharing its 4 threads
-  throughout (see caveat in `experiment_results_rmit/metadata_rmit.json`);
-  the cloud VM run does not have this confound and should be treated as
-  the primary dataset where the two disagree, though in practice they
-  agree closely (§4).
 - The server process is restarted before every run, but OS-level state
   (page cache, TCP port reuse, kernel socket buffers) still carries over
   between runs on the same machine — full OS-level isolation (e.g., a
@@ -565,10 +528,14 @@ per-sample output by eye before trusting an aggregate.
   cloud VM, 3000 clients / 8 vCPUs on the second) this is a genuine
   thread-oversubscription stress test, not a clean saturation curve
   measuring the server in isolation from its own load generator.
-- Three hardware configurations were tested (one physical laptop, two
-  cloud VMs, all x86-64, 4-8 vCPUs/threads). No claim is made about
-  behavior on hardware with substantially different core counts, NUMA
-  topology, or non-x86 architectures.
+- Two hardware configurations were tested: Azure `Standard_D4s_v6` and
+  `Standard_D8s_v6` (both x86-64, same region and VM family, 4-8 vCPUs). The
+  two datasets are replicates of the comparison across VM size and workload
+  coverage, not independent tests across hardware families, clouds, regions, or
+  architectures, and no claim is made about behavior on hardware with
+  substantially different core counts, NUMA topology, or non-x86 architectures.
+  Both were run on shared cloud infrastructure whose noisy-neighbor behavior
+  is not observable from the guest.
 - The advanced (§4b) dataset uses 15 repetitions per configuration vs 30
   for the first cloud VM run, trading some statistical tightness (mean CI
   width 0.0177 vs 0.0091) for 3x the design coverage (workload type x
@@ -578,19 +545,19 @@ per-sample output by eye before trusting an aggregate.
   both computed from each dataset's `raw_data_rmit.csv`. (a) A closed-form
   paired-design estimate, `MDE ≈ (z_.975 + z_.80) × SD / sqrt(n)` (80% power,
   95% confidence), from the pooled SD of per-block strategy/`disabled`
-  throughput ratios (`benchmarks/compute_mde.py`): **1.5% on the laptop**
-  (SD 0.021, n=15 reps/cell), **0.9% on Azure D4s_v6** (SD 0.017, n=30), and
-  **2.1% on Azure D8s_v6 / advanced** (SD 0.029, n=15). (b) An
+  throughput ratios (`benchmarks/compute_mde.py`): **0.9% on Azure D4s_v6**
+  (SD 0.017, n=30 reps/cell) and **2.1% on Azure D8s_v6 / advanced** (SD 0.029,
+  n=15). (b) An
   injected-effect simulation adapted from Laaber et al. (2019): for each
   cell, remove its own effect, inject an overhead x, resample n paired
   ratios, and test whether the 95% percentile-bootstrap CI of the median (the
   interval `analyze_rmit_results.py` reports) excludes 1
   (`benchmarks/simulate_mde.py`; 400 simulations x 400 bootstrap resamples per
-  cell and x, seed 0). At x = 0 the test rejects in 4%-6% of simulations
-  (nominal 5%). Pooled power reaches 80% at about **1.5%** (laptop; 0.71 at 1%
-  and 0.86 at 1.5%), **1.0%-1.5%** (Azure D4s_v6; 0.80 at 1%, 0.96 at 1.5%),
-  and **2.0%** (Azure D8s_v6; 0.50 at 1%, 0.81 at 2%). The two methods agree to
-  within the simulation grid. Most of the
+  cell and x, seed 0). At x = 0 the test rejects in 5%-6% of simulations
+  (nominal 5%). Pooled power reaches 80% at about **1.0%-1.5%** on Azure
+  D4s_v6 (0.80 at 1.0%, 0.96 at 1.5%) and **2.0%** on Azure D8s_v6 (0.51 at
+  1.0%, 0.81 at 2.0%). The two methods agree to within the simulation grid.
+  Most of the
   adjacent-strategy gaps in §4 and §4b's tables (often 0.2-0.5
   percentage points) are below this floor in at least one dataset. This
   means "no significant crossover" and "adjacent strategies are
@@ -598,27 +565,27 @@ per-sample output by eye before trusting an aggregate.
   read as *this design's power is exhausted at gaps below roughly 1-2%*,
   not as *no difference exists* — a true effect smaller than the relevant
   MDE could be present in any single dataset without this design being
-  able to see it. The one claim in §4b that survives this caveat is that
-  `thread_local` takes rank 1 (cheapest) and `sharded_2key` takes rank 2
-  in all three independent datasets — replication across three
-  separately-powered datasets is evidence even where no single dataset's
-  pairwise CI excludes zero. Ranks 3-5 (`global_mutex`, `hdr_histogram`,
-  `sharded_n`) reshuffle between datasets and are not claimed to be
-  distinguishable from each other.
+  able to see it. The claim in §4b that survives this caveat is that
+  `thread_local` takes rank 1 (cheapest), `sharded_2key` rank 2, and
+  `sharded_n` rank 5 on both VMs — agreement across two separately-powered
+  datasets is weak evidence even where no single dataset's pairwise CI
+  excludes zero, and only weak because the VMs share a family and region.
+  Ranks 3-4 (`global_mutex` and `hdr_histogram`) swap between datasets and
+  are not claimed to be distinguishable from each other.
 
 ## 8. Conclusion
 
 This paper measured the throughput cost of six per-command metrics
 strategies in a Rust in-memory key-value server using Randomized Multiple
 Interleaved Trials (Abedi, Heard, and Brecht, 2015; Abedi and Brecht, 2017)
-on three machines — a Linux laptop and dedicated 4- and 8-vCPU Azure VMs —
-over 4,320 runs and 240 configurations, from 25 to 3000 concurrent clients and
-three workload mixes. No two-state throughput pattern appeared, and run-to-run
-variability was low (mean relative 95% CI width 0.9%-1.8%). Every strategy
-costs a small, flat overhead (0.5%-2.1% on average, at most 2.6% at 50 or more
-clients), with `thread_local` cheapest and `sharded_2key` second on all three
-machines. The design detects overheads of roughly 1-2% (§7), so finer
-distinctions among the other three strategies are unresolved, not absent.
+on two dedicated Azure VMs (4 and 8 vCPUs) over 3,600 runs and 192
+configurations, from 100 to 3000 concurrent clients and three workload mixes.
+No two-state throughput pattern appeared, and run-to-run variability was low
+(mean relative 95% CI width 0.9%-1.8%). Every strategy costs a small, flat
+overhead (0.5%-2.0% on average, at most 2.31% at any concurrency level,
+workload-averaged), with `thread_local` cheapest, `sharded_2key` second, and
+`sharded_n` costliest on average on both VMs. The design detects overheads of roughly 1-2% (§7), so finer
+distinctions among the middle-ranked strategies are unresolved, not absent.
 Two methodological points generalize beyond this server: randomizing
 configuration order per repetition keeps a drifting environment from
 concentrating on one configuration (§2, §6), and a systematic infrastructure
@@ -718,30 +685,26 @@ reference-manager step.
 ## Appendix: Reproducibility
 
 ```bash
-# Laptop-class hardware
-python3 benchmarks/run_rmit_experiment.py --runs 30 --output-dir experiment_results_rmit
-python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit/raw_data_rmit.csv
-
-# Dedicated cloud VM, single workload (see docs/rmit_experiment_protocol.md for full az CLI steps)
+# Dedicated cloud VM (Azure Standard_D4s_v6), single workload (see docs/rmit_experiment_protocol.md for full az CLI steps)
 RMIT_ENVIRONMENT_LABEL=<label> python3 benchmarks/run_rmit_experiment.py \
   --runs 30 --concurrency 100,200,300,400,500,600,700,1000 \
   --output-dir experiment_results_rmit_azure
 python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit_azure/raw_data_rmit.csv
 
-# Dedicated cloud VM, advanced: 3 workloads x wider concurrency range
+# Dedicated cloud VM (Azure Standard_D8s_v6), advanced: 3 workloads x wider concurrency range
 RMIT_ENVIRONMENT_LABEL=<label> python3 benchmarks/run_rmit_experiment.py \
   --runs 15 --concurrency 100,250,500,750,1000,1500,2000,3000 \
   --workloads mixed,read-heavy,write-heavy \
   --output-dir experiment_results_rmit_advanced
 python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit_advanced/raw_data_rmit.csv
 
-# Every table value and quoted statistic in §4-§4b (prints them all), from the three rmit_analysis.json files above
+# Every table value and quoted statistic in §4-§4b (prints them all), from the two rmit_analysis.json files above
 python3 benchmarks/paper_tables.py
 
 # Figures 1 and 2 (§4b), generated from the same files
 python3 benchmarks/generate_paper_figures.py
 
-# Minimum detectable effect numbers (§7), from the three raw_data_rmit.csv files above
+# Minimum detectable effect numbers (§7), from the two raw_data_rmit.csv files above
 python3 benchmarks/compute_mde.py       # closed-form estimate
 python3 benchmarks/simulate_mde.py      # injected-effect simulation (needs numpy; ~2 minutes)
 ```
