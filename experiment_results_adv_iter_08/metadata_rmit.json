@@ -1,0 +1,46 @@
+{
+  "design": "RMIT (randomized multiple interleaved trials): fresh random permutation of (strategy, concurrency, workload) triples per repetition; server restarted before every run.",
+  "run_id": "20260928_175632",
+  "timestamp_utc": "2026-09-28T21:59:31Z",
+  "machine_specs": {
+    "environment": "azure-Standard_D8s_v6-westus3-vm1-iter08",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "processor": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "python_version": "3.12.3",
+    "logical_cpus": 8,
+    "mem_total_bytes": 33650245632,
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "commit_hash": "e036c1b2353800f9eb6f2b4348d34d1234361640"
+  },
+  "runtime_config": {
+    "strategies": [
+      "Disabled",
+      "GlobalMutex",
+      "Sharded-2key",
+      "ThreadLocal",
+      "HdrHistogram",
+      "Sharded-N"
+    ],
+    "concurrency_levels": [
+      100,
+      250,
+      500,
+      750,
+      1000,
+      1500,
+      2000,
+      3000
+    ],
+    "workloads": [
+      "mixed",
+      "read-heavy",
+      "write-heavy"
+    ],
+    "repetitions": 15,
+    "requests_per_client": 1000,
+    "key_space": 10000,
+    "value_size": 64,
+    "seed": 1008
+  }
+}
