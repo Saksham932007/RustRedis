@@ -1,0 +1,66 @@
+{
+  "design": "RMIT (randomized multiple interleaved trials): fresh random permutation of (strategy, concurrency, workload) triples per repetition; server restarted before every run.",
+  "run_id": "20260929_160926",
+  "timestamp_utc": "2026-09-29T17:14:22Z",
+  "machine_specs": {
+    "environment": "azure-Standard_D8s_v6-southindia-followup-07",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "processor": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "python_version": "3.12.3",
+    "logical_cpus": 8,
+    "mem_total_bytes": 33650241536,
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "commit_hash": ""
+  },
+  "runtime_config": {
+    "strategies": [
+      "Disabled",
+      "GlobalMutex",
+      "Sharded-2key",
+      "ThreadLocal",
+      "HdrHistogram",
+      "Sharded-N",
+      "ThreadLocal-Owned",
+      "Sharded-Bucketed-1",
+      "Sharded-Bucketed-10",
+      "Sharded-Bucketed-100",
+      "Sharded-Bucketed-1000",
+      "Sharded-Bucketed-10000"
+    ],
+    "strategy_config_ids": [
+      "disabled",
+      "global_mutex",
+      "sharded_2key",
+      "thread_local",
+      "hdr_histogram",
+      "sharded_n",
+      "thread_local_owned",
+      "sharded_bucketed_c1",
+      "sharded_bucketed_c10",
+      "sharded_bucketed_c100",
+      "sharded_bucketed_c1000",
+      "sharded_bucketed_c10000"
+    ],
+    "metric_cardinalities": [
+      1,
+      10,
+      100,
+      1000,
+      10000
+    ],
+    "concurrency_levels": [
+      100,
+      1000,
+      3000
+    ],
+    "workloads": [
+      "mixed"
+    ],
+    "repetitions": 15,
+    "requests_per_client": 1000,
+    "key_space": 10000,
+    "value_size": 64,
+    "seed": 2007
+  }
+}
