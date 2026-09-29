@@ -1,0 +1,17 @@
+{
+  "description": "Pooled dataset: 10 independent RMIT advanced-design runs on 10 separately-provisioned Azure Standard_D8s_v6 VMs (4 regions: Central India x2, South India, West US 3), each with its own random seed. block_id offset by iteration*100 to keep paired-block comparisons scoped to the single VM run they came from.",
+  "n_iterations": 10,
+  "rows_per_iteration": {
+    "experiment_results_adv_iter_01": 2160,
+    "experiment_results_adv_iter_02": 2160,
+    "experiment_results_adv_iter_03": 2160,
+    "experiment_results_adv_iter_04": 2160,
+    "experiment_results_adv_iter_05": 2160,
+    "experiment_results_adv_iter_06": 2160,
+    "experiment_results_adv_iter_07": 2160,
+    "experiment_results_adv_iter_08": 2160,
+    "experiment_results_adv_iter_09": 2160,
+    "experiment_results_adv_iter_10": 2160
+  },
+  "total_rows": 21600
+}

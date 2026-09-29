@@ -17,7 +17,8 @@ from statistics import mean
 ROOT = Path(__file__).resolve().parent.parent
 DATASETS = [
     ("azure_d4s_v6", "experiment_results_rmit_azure"),
-    ("azure_d8s_v6_advanced", "experiment_results_rmit_advanced"),
+    ("azure_d8s_v6_advanced_1x", "experiment_results_rmit_advanced"),
+    ("azure_d8s_v6_advanced_10x_pooled", "experiment_results_adv_pooled"),
 ]
 STRATS = ["thread_local", "sharded_2key", "global_mutex", "hdr_histogram", "sharded_n"]
 
