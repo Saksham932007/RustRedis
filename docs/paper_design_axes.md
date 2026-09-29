@@ -28,10 +28,12 @@ into a factorial decomposition. Measurements use Randomized Multiple
 Interleaved Trials, repeated as eleven independent runs across five separately
 provisioned Azure `Standard_D8s_v6` VMs in three regions, plus one
 `Standard_D4s_v6` VM (25,200 benchmark runs; 100–3000 concurrent clients; three
-read/write mixes), with all confidence intervals clustered on the eleven
-independent runs rather than on the 165 correlated blocks they contain.
+read/write mixes), with all confidence intervals clustered on the independent
+runs rather than on the correlated blocks they contain. A second, dedicated
+eight-VM experiment (4,320 further runs) separates the two axes that the main
+design bundles, for 29,520 benchmark runs in all.
 
-Three results follow. **(1)** Moving the metric key from a 2-entry command-name
+Four results follow. **(1)** Moving the metric key from a 2-entry command-name
 label to a ~10,000-entry data-key label costs 0.87 pp of throughput, 1.66×
 more than the 0.52 pp that replacing a global mutex with a 64-way sharded
 concurrent map saves (difference 0.34 pp, 95% CI [0.19, 0.50], 10/11 runs,
@@ -51,7 +53,16 @@ the histogram payload cost is rigid, statistically identical across throughput,
 mean, p50, and p99 (0.89–0.94 pp). This produces a rank inversion invisible to
 throughput-only evaluation: HdrHistogram versus GlobalMutex is unresolved on
 throughput (p = 0.23) yet resolves decisively in *opposite directions* at p50
-(cheaper, p = 0.001) and p99 (costlier, p = 0.001).
+(cheaper, p = 0.001) and p99 (costlier, p = 0.001). **(4)** A purpose-built
+instrument — a collector whose per-operation work is identical at every
+cardinality, so that sweeping it varies only the number of live map entries —
+confirms that the cardinality axis is genuinely cardinality rather than the
+per-operation key allocation bundled with it (entry count accounts for
+essentially all of it; the histogram likewise accounts for ~80% of the payload
+axis). The same experiment bounds the claim: the effect is indistinguishable
+from zero below roughly 10³ entries, and cardinality *alone* does not
+statistically outrank the synchronization axis, so we make the package claim
+in (1) and not the stronger one.
 
 We argue that observability overhead should be budgeted per design axis and per
 target percentile, not as a single headline percentage, and we give the
@@ -131,7 +142,10 @@ percentiles and makes throughput-only evaluation actively misleading (§5.3).
 2. **The cardinality-dominance result** (§5.1): high-cardinality dynamic
    labeling costs 1.66× what the entire global-lock-to-sharded-map transition
    saves, inverting the usual optimization priority, and reproducing on both VM
-   sizes (4.5× at 4 workers, 1.66× at 8).
+   sizes (4.5× at 4 workers, 1.66× at 8). A dedicated eight-VM experiment
+   (§5.4) shows the effect is cardinality itself and not the key allocation
+   bundled with it, and bounds where it applies: below ~10³ entries it is
+   indistinguishable from zero.
 3. **A scaling-law separation** (§5.2): telemetry axes are invariant to client
    concurrency over a 30× range on a saturated server, while the
    synchronization axis tracks worker-thread count — with the methodological
@@ -140,9 +154,14 @@ percentiles and makes throughput-only evaluation actively misleading (§5.3).
    a tail-concentration index separating elastic from rigid costs, and a
    demonstration that a comparison reported as statistically unresolved under a
    throughput budget resolves in opposite directions at p50 and p99.
-5. **A reproducible measurement design and artifact** (§4, Appendix A):
-   25,200 RMIT runs, cluster-aware inference, and committed scripts that
-   regenerate every number in the paper.
+5. **An instrument for pricing metric cardinality in isolation** (§5.4): a
+   collector that holds per-operation work byte-for-byte constant while the
+   live entry count sweeps 3.5 decades, which is a cleaner control than
+   sweeping the workload key space (that would vary the request distribution
+   too). It is reusable by anyone asking the same question of another system.
+6. **A reproducible measurement design and artifact** (§4, Appendix A):
+   29,520 RMIT runs over fourteen cloud VMs, cluster-aware inference, and
+   committed scripts that regenerate every number in the paper.
 
 ---
 
@@ -275,28 +294,32 @@ of them bear on the headline claim.
   claim survives it — the true gap is if anything wider than reported. We
   report the measured value and treat it as a conservative upper bound on the
   synchronization axis.
-- **CARD conflates cardinality with owned-key allocation.** `sharded_n` keys
-  its map by an owned `String`, allocated per operation, whereas
-  `sharded_2key` uses a `&'static str`. The contrast therefore prices
-  "labeling by a high-cardinality dynamic value" as a package — map growth to
-  ~10,000 entries *plus* the per-operation key materialization that such
-  labeling requires — rather than map cardinality in isolation. We consider the
-  package the practically relevant quantity, because a dynamic label in a real
-  system (a user ID, a route, a tenant) must be materialized as a key on every
-  operation too; but the mechanistic attribution between the two components is
-  unresolved by this experiment, and §7 proposes the direct follow-up.
-- **PAYLOAD shares that allocation term.** `hdr_histogram` also keys by an
-  owned `String` while `thread_local` uses `&'static str`, so PAYLOAD prices
-  the histogram *plus* the same key materialization. Its cardinality is 2, so
-  no map-growth component is involved.
+- **CARD bundles cardinality with owned-key allocation — and §5.4 separates
+  them.** `sharded_n` keys its map by an owned `String`, allocated per
+  operation, whereas `sharded_2key` uses a `&'static str`. As specified, the
+  contrast therefore prices "labeling by a high-cardinality dynamic value" as a
+  package — map growth to ~10,000 entries *plus* the per-operation key
+  materialization that such labeling requires. That package is the practically
+  relevant quantity, since a dynamic label in a real system (a user ID, a
+  route, a tenant) must be materialized on every operation too. But the
+  attribution between the two components mattered enough to measure directly,
+  and §5.4 reports a dedicated eight-run experiment that does so: the entry
+  count accounts for essentially all of CARD. The axis is cardinality, not an
+  allocation artifact.
+- **PAYLOAD shares that allocation term — and §5.4 separates it too.**
+  `hdr_histogram` also keys by an owned `String` while `thread_local` uses
+  `&'static str`, so PAYLOAD as specified prices the histogram *plus* the same
+  key materialization. Its cardinality is 2, so no map-growth component is
+  involved. §5.4 finds roughly 80% of PAYLOAD is the histogram itself.
 - **DEFER is close to clean.** Both sides use `&'static str` keys at
   cardinality 2. `thread_local` additionally increments a shared atomic
   flush counter per operation and performs a periodic batch push, which is
   intrinsic to deferred aggregation rather than incidental to it.
 
 Two axes (SYNC, DEFER) are therefore clean-to-conservative, and two (CARD,
-PAYLOAD) price a coherent package that includes a shared allocation term. §7
-returns to this as the principal internal-validity threat.
+PAYLOAD) price a coherent package that includes a shared allocation term. §5.4
+decomposes that package with a separate experiment and finds the package is
+dominated by the axis it is named for in both cases.
 
 ---
 
@@ -322,8 +345,9 @@ the block slows numerator and denominator alike.
 |---|---|---|---:|
 | `azure_d4s_v6` | `Standard_D4s_v6`, 4 vCPU / 16 GB, Central India | 6 strategies × 8 concurrency (100–1000) × 30 blocks, mixed workload | 1,440 |
 | `azure_d8s_v6` (pooled) | `Standard_D8s_v6`, 8 vCPU / 32 GB, 5 VMs across 3 regions | 6 strategies × 8 concurrency (100–3000) × 3 workloads × 15 blocks, **× 11 independent runs** | 23,760 |
+| `azure_d8s_v6_followup` (§5.4) | `Standard_D8s_v6`, 8 VMs across 3 regions | 12 strategy configs (incl. a 5-point cardinality sweep) × 3 concurrency × 1 workload × 15 blocks, **× 8 independent runs** | 4,320 |
 
-**25,200 runs total.** Each VM was provisioned solely for the benchmark and
+**29,520 runs in total**, of which 25,200 are the main design and 4,320 the axis-separation experiment of §5.4. Each VM was provisioned solely for the benchmark and
 deleted afterwards; nothing else ran on it. The eleven D8s_v6 runs use distinct random
 seeds across five separately-provisioned VMs in three regions: the initial
 validation run on its own Central India VM, then runs 01-10 distributed over two
@@ -584,6 +608,104 @@ tail-latency *visibility* is paying for it in tail-latency *cost*.
 
 ---
 
+### 5.4 Result 4 — Separating the bundled axes: the cardinality is real
+
+§3.3 noted that two of the four contrasts bundle an extra cost with the axis
+they name: both `sharded_n` and `hdr_histogram` key their maps by an owned
+`String` allocated per operation, while their comparators use a `&'static str`.
+Whether CARD measures cardinality or merely that allocation is not a detail —
+it decides whether the practitioner advice is "shrink the label set" or "intern
+the label". We therefore ran a dedicated experiment.
+
+**Instruments.** Two collectors were added (`src/command_metrics.rs`).
+`sharded_bucketed` keys a `DashMap` by `"<CMD>#<fnv1a(logical key) mod C>"`,
+with `C` set per run. The point is that **per-operation work is identical at
+every `C`** — one hash, one modulo, one `format!`, one allocation, one map
+lookup — so sweeping `C` varies the number of live entries and nothing else.
+This is a stronger instrument than sweeping the workload key space, which would
+vary the request distribution alongside the cardinality. `thread_local_owned`
+is a line-for-line twin of the HdrHistogram collector with `CommandStat`
+substituted for the histogram, isolating the histogram payload.
+
+**Design.** Eight independently provisioned `Standard_D8s_v6` VMs (two rounds
+of four, across Central India ×2, South India, and West US 3; same Xeon
+Platinum 8573C and toolchain as the main batch), 12 strategy configurations ×
+3 concurrency levels × 15 blocks = 540 runs each, **4,320 runs in total**.
+§5.2's concurrency-invariance result is what licenses the reduced concurrency
+coverage here. Intervals cluster on the eight runs, t(7).
+
+**The anchors reproduce**, so the batch is comparable: SYNC 0.527 (main batch
+0.522), DEFER 0.290 (0.309), PAYLOAD 0.967 (0.885). CARD is 0.642 here against
+0.866 in the main batch — intervals overlap, but this batch covers three
+concurrency levels and one workload rather than eight and three, so the main
+batch remains the reference for CARD's magnitude.
+
+**Table 6.** The bundled axes, decomposed (pp of throughput, 95% CI clustered
+on 8 runs).
+
+| Quantity | Estimate | 95% CI | |
+|---|---:|---|---|
+| **pure cardinality** (2 → 13,040 entries, per-op work identical) | **0.652** | [0.280, 1.024] | resolved |
+| CARD total (`sharded_n` − `sharded_2key`) | 0.642 | [0.316, 0.967] | resolved |
+| **histogram alone** (`hdr_histogram` − `thread_local_owned`) | **0.773** | [0.539, 1.006] | resolved |
+| PAYLOAD total (`hdr_histogram` − `thread_local`) | 0.967 | [0.709, 1.226] | resolved |
+| key construction, FNV + `format!` (`sharded_bucketed`@1 − `sharded_2key`) | 0.855 | [0.393, 1.317] | resolved |
+| owned-key allocation, TLS path (`thread_local_owned` − `thread_local`) | 0.195 | [−0.017, 0.407] | not resolved |
+
+Two conclusions follow. **The CARD axis is genuinely cardinality**: the pure
+entry-count effect (0.652) accounts for essentially all of CARD's total
+(0.642), leaving no room for a material allocation component in `sharded_n`'s
+key path. **The PAYLOAD axis is genuinely the histogram**: 0.773 of 0.967, or
+about 80%, with the residual allocation term not resolved. Both bundles are
+dominated by the axis they are named for, which is the outcome that supports
+the paper's framing rather than overturning it.
+
+The key-construction figure is separately interesting — building a key with a
+hash and a `format!` costs 0.855 pp, comparable to the whole cardinality
+effect — but it is the *bucketed collector's own* key path, not a component of
+CARD, and we do not fold it into the headline.
+
+**The cardinality cost is not linear in entries; it appears above ~10³.**
+
+![Cost against live metric-map entries](figures/axes_fig4_cardinality_curve.png)
+
+**Figure 4.** Added cost as the live entry count sweeps 3.5 decades with
+per-operation work held constant. Plotted as the *paired* difference against
+the 2-entry configuration — the quantity actually tested — so the intervals
+shown are the ones the resolved/unresolved verdict rests on; each
+configuration's absolute cost carries a much wider interval dominated by
+between-run level differences that the paired form cancels.
+
+| Data entries | Cost vs `disabled` | vs 2 entries | |
+|---:|---:|---|---|
+| 2 | 1.707% | (reference) | |
+| 20 | 1.805% | +0.097 [−0.107, 0.302] | not resolved |
+| 200 | 1.796% | +0.089 [−0.175, 0.352] | not resolved |
+| 2,000 | 2.014% | +0.306 [0.069, 0.543] | resolved |
+| 13,040 | 2.360% | +0.652 [0.280, 1.024] | resolved |
+
+Below roughly a thousand entries the effect is indistinguishable from zero at
+this design's resolution. Practitioners bounding label cardinality in the tens
+or low hundreds are therefore not buying throughput by doing so — the
+server-side cost only becomes measurable in the thousands. (The backend
+argument for bounding cardinality is unaffected; it is a different cost.)
+
+**What this experiment does not establish.** The *strong* form of §5.1 — that
+cardinality alone outranks the synchronization axis — is **not** resolved here:
+pure cardinality minus SYNC is +0.125 pp, 95% CI [−0.358, 0.607], agreeing in
+direction in only 4 of 8 runs (1.24×). §5.1's claim concerns CARD, the package,
+against SYNC, and that comparison stands on the eleven-run main batch; the
+present batch establishes what the package is made of, not a new ordering.
+
+**An unplanned demonstration of why the paired design matters.** One of the
+eight VMs (`run_06`) returned absolute throughput about 30% below its peers
+across every configuration — a degraded or noisy instance of exactly the kind
+§2 warns about. Recomputing every contrast in Table 6 with that run excluded
+moves each by less than 0.05 pp, because the paired within-block ratio cancels
+a level shift that affects numerator and denominator alike. A design comparing
+absolute throughputs across instances would have been badly distorted by the
+same run.
+
 ## 6. Discussion and Implications
 
 **For engineers instrumenting a similar server.** Per-command telemetry costs
@@ -591,12 +713,18 @@ at most ~2.2% here, so the question is rarely whether to instrument but how.
 Given that budget, the priority order implied by these results differs from the
 common one:
 
-1. **Reduce metric key cardinality before optimizing the lock.** The
-   cardinality axis is worth 1.66× the synchronization axis at 8 cores and 4.5×
-   at 4. A sharded map with a high-cardinality label is slower than a global
-   mutex with a low-cardinality one (§5.1). Cardinality is already known to be
-   expensive at the *backend*; it is also the larger *producer-side* cost, and
-   the two arguments point the same way.
+1. **Reduce metric key cardinality before optimizing the lock — above ~10³
+   labels.** The cardinality axis is worth 1.66× the synchronization axis at 8
+   cores and 4.5× at 4, and a sharded map with a high-cardinality label is
+   slower than a global mutex with a low-cardinality one (§5.1). §5.4 shows
+   this is the entry count itself rather than the key allocation bundled with
+   it, and puts a threshold on the advice: below roughly a thousand live
+   entries the server-side effect is indistinguishable from zero, so a team
+   already holding label cardinality to the tens or low hundreds gains no
+   throughput by shrinking it further. (The backend argument for bounding
+   cardinality is a separate cost and unaffected.) Where cardinality is in the
+   thousands and above, it is the larger producer-side cost and the two
+   arguments point the same way.
 2. **Choose the collector against the percentile you actually budget.**
    ThreadLocal is cheapest under every metric and is the default choice. If
    per-command histograms are required, HdrHistogram costs ~1.4% throughput —
@@ -623,30 +751,28 @@ overstates precision by roughly 20%.
 
 ## 7. Threats to Validity
 
-**Internal.** The principal threat is contrast purity (§3.3). CARD and PAYLOAD
-each bundle an owned-key allocation with the axis of interest, so CARD prices
-"high-cardinality dynamic labeling" as a package rather than map cardinality in
-isolation. We regard the package as the practically meaningful quantity, since
-a dynamic label must be materialized per operation in any real system, but the
-internal decomposition is unresolved. The decisive follow-up is cheap, specified, and now
-implemented in the artifact (`sharded_bucketed` and `thread_local_owned` in
-`src/command_metrics.rs`; see `docs/followup_experiment_protocol.md`).
-`sharded_bucketed` keys a `DashMap` by `"<CMD>#<hash(logical key) mod C>"`, so
-per-operation work — one hash, one modulo, one `format!`, one allocation, one
-map lookup — is *identical at every C*, and only the number of live entries
-changes. Contrasting it against `sharded_2key` at C=1 prices owned-key
-materialization alone; contrasting it against itself at C=1 versus C=10⁴ prices
-map entry count alone. `thread_local_owned` does the same for the payload axis:
-it is a line-for-line twin of the HdrHistogram collector with `CommandStat` in
-place of the histogram, so `hdr_histogram − thread_local_owned` prices the
-histogram alone. Note this is a stronger design than sweeping the workload key
-space, which would vary the request distribution alongside the cardinality. Conversely, the
-SYNC axis is inflated by `global_mutex`'s self-instrumentation (two `Instant`
-reads and a contended atomic per operation), which biases *against* the paper's
-headline claim; the claim therefore survives this confound rather than
-depending on it. The §5.3 merge-stall mechanism is an interpretation
-consistent with the data, not a measurement; direct instrumentation of flush
-duration would test it.
+**Internal.** Contrast purity (§3.3) was the principal threat: CARD and PAYLOAD
+each bundle an owned-key allocation with the axis they name. §5.4 resolves it
+with a dedicated eight-run experiment — the entry count accounts for
+essentially all of CARD, and the histogram for about 80% of PAYLOAD — so both
+bundles are dominated by the axis they are named for. What remains open from
+that experiment is narrower and stated there: the owned-key allocation term in
+the TLS path is not resolved (0.195 pp, CI spanning zero), and the pure
+cardinality effect is indistinguishable from zero below roughly 10³ entries, so
+the CARD magnitude reported in §5.1 should be read as specific to a
+~10⁴-entry label, not as a general per-entry rate.
+
+Conversely, the SYNC axis is inflated by `global_mutex`'s self-instrumentation
+(two `Instant` reads and a contended atomic per operation), which biases
+*against* the paper's headline claim; the claim therefore survives this
+confound rather than depending on it. §5.1's claim is about CARD — the package
+an engineer actually adopts when they label by a dynamic value — versus SYNC.
+The stronger statement that cardinality *alone* outranks the synchronization
+axis is **not** supported: §5.4 puts that difference at +0.125 pp with an
+interval spanning zero. We make the package claim and not the stronger one.
+
+The §5.3 merge-stall mechanism is an interpretation consistent with the data,
+not a measurement; direct instrumentation of flush duration would test it.
 
 **Construct.** The benchmark client is custom, not YCSB [6], so absolute
 throughputs are not comparable to published YCSB results; the paired
@@ -691,9 +817,9 @@ claim about a specific estimator.
 ## 8. Conclusion
 
 We decomposed per-command observability overhead in a concurrent in-memory
-key-value store into four separately-priced design axes, measured across 25,200
-RMIT benchmark runs on six dedicated cloud VMs with inference clustered on independent
-runs. The decomposition contradicts the standard optimization priority: the
+key-value store into four separately-priced design axes, measured across 29,520
+RMIT benchmark runs on fourteen dedicated cloud VMs with inference clustered on
+independent runs. The decomposition contradicts the standard optimization priority: the
 metric-cardinality axis costs 1.66× the synchronization axis at 8 worker
 threads and 4.5× at 4, so a sharded concurrent map carrying a high-cardinality
 label is measurably slower than a single global mutex carrying a low-cardinality
@@ -707,12 +833,24 @@ into queueing slack at the tail, whereas histogram-payload cost is rigid and
 statistically identical at the median and at p99. That difference produces a
 sign reversal which a throughput-only evaluation reports as a confident null.
 
+A separate eight-VM experiment settles what the cardinality axis is actually
+made of. Using a collector whose per-operation work is held byte-for-byte
+constant while the live entry count sweeps 3.5 decades, the entry count is
+shown to account for essentially all of the axis, and the histogram for about
+80% of the payload axis — so both bundles are dominated by the axis they are
+named for. The same experiment marks the boundary of the result: the effect is
+indistinguishable from zero below roughly 10³ entries, and cardinality alone
+does not statistically outrank the synchronization axis, so the claim we make
+is about high-cardinality labeling as a package, which is the thing an engineer
+actually adopts.
+
 The unifying claim is that observability overhead should be budgeted per design
 axis and per target percentile. A single headline percentage, measured under a
 single metric at a single client load, can be simultaneously accurate and
-useless for the decision it is meant to inform. The most valuable next
-experiment is the cheapest one: sweep the metric key space directly, and
-separate key materialization from cardinality.
+useless for the decision it is meant to inform. The natural next steps are to
+instrument the histogram merge directly, to test whether the axes keep their
+separate scaling laws past eight cores, and to check whether the ~10³-entry
+threshold is a property of this server or of the class.
 
 ---
 
@@ -751,6 +889,24 @@ python3 scripts/analyze_design_axes.py
 
 # Figures 1-3, recomputed from the same helpers the tables use
 python3 scripts/generate_design_axes_figures.py
+
+# Section 5.4: the axis-separation experiment (8 independent runs)
+python3 scripts/combine_iterations.py \
+    --input-dir experiments/azure_d8s_v6_followup \
+    --output-dir experiments/azure_d8s_v6_followup/pooled
+python3 scripts/analyze_design_axes.py --followup-only \
+    --pooled-csv experiments/azure_d8s_v6_followup/pooled/raw_data_rmit.csv
+```
+
+To regenerate the §5.4 dataset, see `docs/followup_experiment_protocol.md`; each
+of the eight runs is one VM:
+
+```bash
+RMIT_ENVIRONMENT_LABEL=<label> python3 scripts/run_rmit_experiment.py \
+  --strategies all --cardinalities 1,10,100,1000,10000 \
+  --runs 15 --concurrency 100,1000,3000 --workloads mixed \
+  --key-space 10000 --seed <distinct> \
+  --output-dir experiments/azure_d8s_v6_followup/run_<NN>
 ```
 
 To regenerate the datasets themselves (each on a dedicated cloud VM; see
