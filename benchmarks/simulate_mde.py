@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATASETS = [
     ("azure_d4s_v6", "experiment_results_rmit_azure/raw_data_rmit.csv"),
     ("azure_d8s_v6_advanced_1x", "experiment_results_rmit_advanced/raw_data_rmit.csv"),
-    ("azure_d8s_v6_advanced_10x_pooled", "experiment_results_adv_pooled/raw_data_rmit.csv"),
+    ("azure_d8s_v6_advanced_11x_pooled", "experiment_results_adv_pooled/raw_data_rmit.csv"),
 ]
 GRID_PCT = [0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0]
 SIMS = 400

@@ -1,6 +1,6 @@
 {
-  "description": "Pooled dataset: 10 independent RMIT advanced-design runs on 10 separately-provisioned Azure Standard_D8s_v6 VMs (4 regions: Central India x2, South India, West US 3), each with its own random seed. block_id offset by iteration*100 to keep paired-block comparisons scoped to the single VM run they came from.",
-  "n_iterations": 10,
+  "description": "Pooled dataset: 11 independent RMIT advanced-design runs. Ten (source_iteration 01-10) are separately-provisioned Azure Standard_D8s_v6 VMs across 4 VM instances / 3 regions (Central India x2, South India, West US 3), each with its own random seed. The eleventh (source_iteration 11) is the original single-VM validation run (experiment_results_rmit_advanced/, Central India, seed 271828182) that first caught the file-descriptor pitfall (paper \u00a73), pooled in as an additional independent replicate of the same design. block_id offset by run_index*100 to keep paired-block comparisons scoped to the single VM run they came from.",
+  "n_iterations": 11,
   "rows_per_iteration": {
     "experiment_results_adv_iter_01": 2160,
     "experiment_results_adv_iter_02": 2160,
@@ -11,7 +11,8 @@
     "experiment_results_adv_iter_07": 2160,
     "experiment_results_adv_iter_08": 2160,
     "experiment_results_adv_iter_09": 2160,
-    "experiment_results_adv_iter_10": 2160
+    "experiment_results_adv_iter_10": 2160,
+    "experiment_results_rmit_advanced": 2160
   },
-  "total_rows": 21600
+  "total_rows": 23760
 }
