@@ -88,8 +88,8 @@ that frame, this paper contributes:
    independent replicate runs actually helps (§4c).** Ten independent
    D8s_v6 runs tighten the detectable-effect floor from about 2% to about
    0.6%-0.75%, not naively but checked two ways: a cluster-aware estimate
-   that treats each of the ten VMs (not each of the 1,500 individual paired
-   blocks) as one independent data point, and an empirical check for
+   that treats each of the ten VMs (not each of the 150 individual paired
+   blocks per cell) as one independent data point, and an empirical check for
    between-VM variance large enough to invalidate a naive pooled estimate.
    Neither Abedi and Brecht (2017) nor Laaber et al. (2019) pool independent
    instances this way and check for the resulting clustering effect; Laaber
@@ -216,8 +216,8 @@ cloud microbenchmarking). This project's specific application:
   (`benchmarks/system_state.py`): CPU frequency, thermal-zone temperature,
   memory/swap, load average, AC/battery status (fields degrade to `null`
   when unavailable, e.g. no thermal sensors or battery on a cloud VM).
-- Two hardware targets (both Azure, same region and VM family), chosen to
-  check that the overhead results are not specific to one VM size:
+- Two hardware targets (both Azure, same VM family), chosen to check that
+  the overhead results are not specific to one VM size:
   - **Cloud VM (v1)**: Azure `Standard_D4s_v6` (4 vCPU, 16GB RAM, Central
     India), provisioned solely for the run and deleted immediately after.
     6 strategies x 8 concurrency levels (100-1000) x 30 repetitions =
@@ -372,15 +372,19 @@ overhead across all 8 concurrency levels for each workload:
 | hdr_histogram | 1.49% | 1.51% | 1.38% |
 | sharded_n | 1.74% | 1.88% | 1.67% |
 
-The full ranking — `thread_local` < `sharded_2key` < `global_mutex` <
-`hdr_histogram` < `sharded_n` — is identical in all three workloads, with no
-near-ties or ambiguous orderings anywhere in this table (the closest gap is
-`global_mutex` vs. `hdr_histogram` in write-heavy, 1.34% vs. 1.38%, still
-clearly separated once pooled). This is a negative result worth stating
-plainly: read/write mix was a plausible place for instrumentation cost to
-interact with workload (e.g. if a strategy's overhead were dominated by
-write-path lock contention, a write-heavy workload might expose it more),
-and it does not, for any of the five strategies.
+The point-estimate ranking — `thread_local` < `sharded_2key` < `global_mutex`
+< `hdr_histogram` < `sharded_n` — is the same in all three workloads. The
+top two and bottom one are comfortably separated in every workload; the
+`global_mutex`-vs-`hdr_histogram` gap is not — 0.16, 0.01, and 0.04
+percentage points in mixed, read-heavy, and write-heavy respectively, all
+well below this design's detectable-effect floor (§4c, §7), consistent with
+that pair being a directional lean rather than a resolved difference (§4c)
+even before splitting by workload. This is still a negative result worth
+stating plainly for the two resolved ends of the ranking: read/write mix was
+a plausible place for instrumentation cost to interact with workload (e.g.
+if a strategy's overhead were dominated by write-path lock contention, a
+write-heavy workload might expose it more), and for `thread_local`,
+`sharded_2key`, and `sharded_n` it does not.
 
 **The "crossovers" the analysis script flags are noise, not signal.**
 `benchmarks/analyze_rmit_results.py`'s crossover detector (which strategy
@@ -463,10 +467,11 @@ clouds (§7).
 The single-VM advanced dataset (§4b's design, run once) could not tell
 `global_mutex` and `hdr_histogram` apart — their overhead gap was smaller
 than that dataset's own minimum detectable effect. Rather than accept that
-as a permanent limitation, we reran the identical design nine more times,
-independently, on four separately-provisioned D8s_v6 VMs across three Azure
-regions (Central India x2, South India, West US 3; §3), for 21,600 total
-runs. `benchmarks/combine_iterations.py` pools the ten runs into one
+as a permanent limitation, we reran the identical design independently nine
+more times (on top of the original run reported in §4b), across four
+separately-provisioned D8s_v6 VMs in three Azure regions (Central India x2,
+South India, West US 3; §3) — ten runs of 2,160 each, 21,600 runs pooled in
+total. `benchmarks/combine_iterations.py` pools the ten runs into one
 dataset: each run's `block_id` (1-15) is offset by its run index before
 concatenation, so the paired within-block comparison (§2) still only ever
 pairs a strategy against `disabled` within the single VM run that block
