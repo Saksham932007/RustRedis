@@ -12,6 +12,9 @@ tables are two views of one computation and cannot silently drift apart.
             threads (only the synchronization axis moves).
   Figure 3  docs/figures/axes_fig3_rigidity.png
             Median-vs-tail cost per strategy: which overheads survive into p99.
+  Figure 4  docs/figures/axes_fig4_cardinality_curve.png
+            Cost against live metric-map entries, with per-operation work held
+            constant across the sweep (follow-up dataset, 8 runs).
 
 Colors are slots 1-5 of the validated categorical reference palette, assigned in
 fixed order and never cycled. Every series also carries a redundant non-color
@@ -230,8 +233,71 @@ def figure3() -> None:
     print(f"  wrote {out}")
 
 
+FOLLOWUP = ROOT / "experiments" / "azure_d8s_v6_followup" / "pooled" / "raw_data_rmit.csv"
+
+
+def figure4() -> None:
+    """Paired cost increase vs the 2-entry reference, as entry count sweeps.
+
+    Plots the PAIRED difference against the C=1 configuration, not each
+    configuration's absolute cost. That is the quantity actually tested: the
+    paired form cancels each run's level, so its interval is far tighter than
+    the absolute cost's and the resolved/unresolved verdict matches the bars a
+    reader sees.
+    """
+    if not FOLLOWUP.exists():
+        print("  (skipping figure 4: follow-up dataset not present)")
+        return
+    blocks = load_blocks(FOLLOWUP)
+    # data-plane entries = achieved - 2 control-plane entries (PING, CMDSTAT)
+    points = [(1, 2), (10, 20), (100, 200), (1000, 2000), (10000, 13040)]
+    base = "sharded_bucketed_c1"
+    xs, ys, los, his = [], [], [], []
+    for c, entries in points:
+        cfg = f"sharded_bucketed_c{c}"
+        if cfg == base:
+            xs.append(entries); ys.append(0.0); los.append(0.0); his.append(0.0)
+            continue
+        m, lo, hi = cluster_ci(by_run(blocks, contrast_fn(cfg, base, "throughput")))
+        xs.append(entries); ys.append(m); los.append(m - lo); his.append(hi - m)
+
+    fig, ax = plt.subplots(figsize=(7.4, 4.0))
+    ax.axhline(0, color="#898781", linewidth=1.2, zorder=1)
+    ax.axvspan(1.4, 1000, color="#e1e0d9", alpha=0.55, zorder=0)
+    ax.errorbar(xs, ys, yerr=[los, his], fmt="-", marker="o", color=AXIS_COLOR["CARD"],
+                linewidth=2, markersize=8, markeredgecolor="white", markeredgewidth=1.4,
+                ecolor=AXIS_COLOR["CARD"], elinewidth=1.4, capsize=4, zorder=3)
+    for x, y, h in zip(xs[1:], ys[1:], his[1:]):
+        ax.annotate(f"+{y:.2f}", (x, y + h), textcoords="offset points", xytext=(0, 7),
+                    ha="center", fontsize=9.5, color="#0b0b0b")
+
+    ax.set_xscale("log")
+    ax.set_xticks([x for _, x in points])
+    ax.set_xticklabels([f"{x:,}" for _, x in points], fontsize=9.5)
+    ax.minorticks_off()
+    ax.annotate("intervals span zero:\nno measurable cost", xy=(45, -0.30), ha="center",
+                fontsize=9.5, color="#52514e")
+    ax.annotate("resolved", xy=(5200, -0.30), ha="center", fontsize=9.5,
+                color=AXIS_COLOR["CARD"], fontweight="medium")
+
+    ax.set_xlabel("live metric-map entries (log scale) — per-operation work identical throughout")
+    ax.set_ylabel("added cost vs the 2-entry case (pp, paired)")
+    ax.set_xlim(1.4, 22000)
+    ax.set_ylim(-0.55, 1.25)
+    ax.set_title("Metric cardinality only starts costing above ~10$^3$ entries\n"
+                 "Azure D8s_v6, 8 independent runs; paired against the 2-entry "
+                 "configuration, 95% CIs clustered on runs",
+                 fontsize=11, loc="left", pad=10)
+    fig.tight_layout()
+    out = FIG_DIR / "axes_fig4_cardinality_curve.png"
+    fig.savefig(out, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  wrote {out}")
+
+
 if __name__ == "__main__":
     figure1()
     figure2()
     figure3()
+    figure4()
     print("done")
