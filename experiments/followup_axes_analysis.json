@@ -1,0 +1,56 @@
+{
+ "n_blocks_pooled": 180,
+ "n_blocks_d4s": 240,
+ "followup": {
+  "ALLOC": {
+   "contrast": "sharded_bucketed_c1 - sharded_2key",
+   "mean": 1.151014553102131,
+   "ci_lo": 0.6888674548989766,
+   "ci_hi": 1.6131616513052853
+  },
+  "PAYLOAD*": {
+   "contrast": "hdr_histogram - thread_local_owned",
+   "mean": 0.653724470753234,
+   "ci_lo": 0.16396674340034662,
+   "ci_hi": 1.1434821981061214
+  },
+  "ALLOC(tls)": {
+   "contrast": "thread_local_owned - thread_local",
+   "mean": 0.26067070050499164,
+   "ci_lo": -0.09775863019521797,
+   "ci_hi": 0.6191000312052013
+  }
+ },
+ "cardinality_curve": {
+  "sharded_bucketed_c1": {
+   "achieved_entries": "4",
+   "cost": 1.8418247199595816,
+   "ci_lo": 1.2038452989207775,
+   "ci_hi": 2.479804140998386
+  },
+  "sharded_bucketed_c10": {
+   "achieved_entries": "22",
+   "cost": 1.8912533705911676,
+   "ci_lo": 1.2704398673568327,
+   "ci_hi": 2.5120668738255025
+  },
+  "sharded_bucketed_c100": {
+   "achieved_entries": "202",
+   "cost": 1.9327737937971674,
+   "ci_lo": 1.5434250234174183,
+   "ci_hi": 2.3221225641769165
+  },
+  "sharded_bucketed_c1000": {
+   "achieved_entries": "2002",
+   "cost": 2.086042127092857,
+   "ci_lo": 1.8281145206317844,
+   "ci_hi": 2.34396973355393
+  },
+  "sharded_bucketed_c10000": {
+   "achieved_entries": "13042",
+   "cost": 2.328272501075208,
+   "ci_lo": 1.5194469709604803,
+   "ci_hi": 3.137098031189936
+  }
+ }
+}
