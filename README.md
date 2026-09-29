@@ -232,6 +232,13 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
 
 ## Documentation
 
+- [docs/paper_design_axes.md](docs/paper_design_axes.md): **"Cardinality Before
+  Contention"** — the design-axis decomposition paper. Prices synchronization,
+  cardinality, aggregation, and payload separately, and finds that metric
+  cardinality costs 1.66x what the global-lock-to-sharded-map transition saves,
+  that no axis responds to client concurrency over a 30x range (the
+  synchronization axis tracks worker threads instead), and that histogram cost
+  is the only overhead that survives undiminished into p99.
 - [docs/paper_draft.md](docs/paper_draft.md): full write-up
 - [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md): experiment protocol and Azure VM setup
 - [docs/system-design.md](docs/system-design.md)

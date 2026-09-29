@@ -37,8 +37,22 @@ pub enum MetricsStrategy {
     Sharded2Key,
     /// DashMap keyed by full logical key (large-key-space sharding).
     ShardedN,
+    /// DashMap keyed by an owned `String` whose cardinality is set by
+    /// `RUSTREDIS_METRICS_CARDINALITY` (default 2). Per-operation work is
+    /// identical at every cardinality — the same hash, the same `format!`,
+    /// the same allocation — so contrasting two cardinalities isolates the
+    /// cost of map entry count alone. See `ShardedBucketedCollector`.
+    ShardedBucketed,
     /// Thread-local counters with periodic merge.
     ThreadLocalBatched,
+    /// Thread-local counters with periodic merge, keyed by an OWNED command name.
+    ///
+    /// The counter-payload twin of `HdrHistogram`: identical TLS map type,
+    /// identical flush machinery, identical owned-key allocation, differing
+    /// only in that it stores a plain `CommandStat` instead of a histogram. So
+    /// `HdrHistogram - ThreadLocalOwned` isolates the histogram payload and
+    /// `ThreadLocalOwned - ThreadLocalBatched` isolates the allocation.
+    ThreadLocalOwned,
     /// Per-thread HdrHistogram with periodic merge.
     HdrHistogram,
 }
@@ -54,6 +68,12 @@ impl MetricsStrategy {
             }
             "sharded_n" | "shardedn" | "sharded_full" | "sharded_full_key" => {
                 MetricsStrategy::ShardedN
+            }
+            "sharded_bucketed" | "shardedbucketed" | "bucketed" => {
+                MetricsStrategy::ShardedBucketed
+            }
+            "thread_local_owned" | "threadlocalowned" | "tls_owned" => {
+                MetricsStrategy::ThreadLocalOwned
             }
             "thread_local" | "threadlocal" | "thread_local_batched" | "tls" => {
                 MetricsStrategy::ThreadLocalBatched
@@ -71,7 +91,9 @@ impl MetricsStrategy {
             MetricsStrategy::GlobalMutex => "global_mutex",
             MetricsStrategy::Sharded2Key => "sharded_2key",
             MetricsStrategy::ShardedN => "sharded_n",
+            MetricsStrategy::ShardedBucketed => "sharded_bucketed",
             MetricsStrategy::ThreadLocalBatched => "thread_local",
+            MetricsStrategy::ThreadLocalOwned => "thread_local_owned",
             MetricsStrategy::HdrHistogram => "hdr_histogram",
         }
     }
@@ -282,6 +304,96 @@ impl ShardedNCollector {
 }
 
 // =============================================================================
+// Strategy C2: Sharded-Bucketed (DashMap keyed by an owned String of tunable
+// cardinality)
+// =============================================================================
+
+/// Default number of distinct metric entries when the environment does not say.
+const DEFAULT_METRIC_CARDINALITY: u64 = 2;
+
+/// Read the configured metric cardinality once, clamped to at least 1.
+fn configured_metric_cardinality() -> u64 {
+    std::env::var("RUSTREDIS_METRICS_CARDINALITY")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v >= 1)
+        .unwrap_or(DEFAULT_METRIC_CARDINALITY)
+}
+
+/// A `DashMap<String, CommandStat>` whose key count is a tunable parameter.
+///
+/// This collector exists to separate two costs that `ShardedN` bundles
+/// together: materializing an owned key on every operation, and holding many
+/// distinct entries in the map. The metric key is
+/// `"<CMD>#<hash(logical key) % cardinality>"`, so **the per-operation work is
+/// the same at every cardinality** — one hash of the logical key, one modulo,
+/// one `format!`, one allocation, one `DashMap` entry lookup. Only the number
+/// of distinct entries in the map changes.
+///
+/// The map therefore holds `n_commands * cardinality` distinct entries (two
+/// commands are exercised here, so 2N), which is what the cardinality contrast
+/// varies; the absolute entry count matters less than the fact that only it
+/// changes.
+///
+/// Two contrasts follow:
+/// * `sharded_bucketed` at cardinality 1 vs `sharded_2key` isolates the cost of
+///   owned-key materialization (both then hold one entry per command).
+/// * `sharded_bucketed` at cardinality N vs at cardinality 1 isolates the cost
+///   of map entry count (every other per-operation step is identical).
+struct ShardedBucketedCollector {
+    data: DashMap<String, CommandStat>,
+    cardinality: u64,
+}
+
+impl ShardedBucketedCollector {
+    fn new() -> Self {
+        ShardedBucketedCollector {
+            data: DashMap::with_shard_amount(METRICS_SHARD_COUNT),
+            cardinality: configured_metric_cardinality(),
+        }
+    }
+
+    /// FNV-1a over the logical key. Deliberately computed at every cardinality
+    /// (including 1) so that per-operation cost does not vary with the
+    /// parameter under study.
+    fn bucket_of(&self, metric_key: &str) -> u64 {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in metric_key.as_bytes() {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash % self.cardinality
+    }
+
+    fn record(&self, cmd_name: &'static str, metric_key: &str, duration_us: u64) {
+        let bucket = self.bucket_of(metric_key);
+        self.data
+            .entry(format!("{}#{}", cmd_name, bucket))
+            .and_modify(|stat| stat.record(duration_us))
+            .or_insert_with(|| {
+                let mut s = CommandStat::new();
+                s.record(duration_us);
+                s
+            });
+    }
+
+    fn snapshot(&self) -> Vec<(String, CommandStat)> {
+        self.data
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .collect()
+    }
+
+    fn cardinality(&self) -> u64 {
+        self.cardinality
+    }
+
+    fn distinct_entries(&self) -> usize {
+        self.data.len()
+    }
+}
+
+// =============================================================================
 // Strategy D: Thread-Local Batched
 // =============================================================================
 
@@ -386,6 +498,146 @@ impl ThreadLocalBatchedCollector {
 
     fn flush_with_batches(&self) -> u64 {
         self.flush_with_batches.load(Ordering::Relaxed)
+    }
+}
+
+// =============================================================================
+// Strategy D2: Thread-Local Owned (counter twin of the HdrHistogram collector)
+// =============================================================================
+
+thread_local! {
+    static TLS_OWNED_STATS: std::cell::RefCell<HashMap<String, CommandStat>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+/// Thread-local accumulation into a `HashMap<String, CommandStat>`, merged
+/// periodically into a shared snapshot.
+///
+/// This is deliberately a line-for-line mirror of [`HdrHistogramCollector`] —
+/// same owned `String` key, same TLS map, same 1000-record flush trigger, same
+/// `pending_batches` handoff, same CAS-guarded flush — with `HdrThreadStat`
+/// replaced by `CommandStat`. Because everything else is held identical,
+/// `hdr_histogram - thread_local_owned` prices the histogram payload alone,
+/// and `thread_local_owned - thread_local` prices the owned-key allocation
+/// alone.
+pub struct ThreadLocalOwnedCollector {
+    global_snapshot: Mutex<HashMap<String, CommandStat>>,
+    pending_batches: Mutex<Vec<HashMap<String, CommandStat>>>,
+    records_since_flush: AtomicU64,
+    count_trigger_hits: AtomicU64,
+    timer_trigger_hits: AtomicU64,
+    phase_swaps: AtomicU64,
+    cas_retries: AtomicU64,
+    flush_in_progress: AtomicBool,
+}
+
+impl ThreadLocalOwnedCollector {
+    fn new() -> Self {
+        ThreadLocalOwnedCollector {
+            global_snapshot: Mutex::new(HashMap::new()),
+            pending_batches: Mutex::new(Vec::new()),
+            records_since_flush: AtomicU64::new(0),
+            count_trigger_hits: AtomicU64::new(0),
+            timer_trigger_hits: AtomicU64::new(0),
+            phase_swaps: AtomicU64::new(0),
+            cas_retries: AtomicU64::new(0),
+            flush_in_progress: AtomicBool::new(false),
+        }
+    }
+
+    fn record(&self, metric_key: &str, duration_us: u64) {
+        TLS_OWNED_STATS.with(|tls| {
+            let mut map = tls.borrow_mut();
+            map.entry(metric_key.to_string())
+                .or_insert_with(CommandStat::new)
+                .record(duration_us);
+        });
+
+        let count = self.records_since_flush.fetch_add(1, Ordering::Relaxed);
+        if count % FLUSH_TRIGGER_EVERY_RECORDS == FLUSH_TRIGGER_EVERY_RECORDS - 1 {
+            self.count_trigger_hits.fetch_add(1, Ordering::Relaxed);
+            self.push_local_batch();
+        }
+    }
+
+    fn push_local_batch(&self) {
+        TLS_OWNED_STATS.with(|tls| {
+            let mut local = tls.borrow_mut();
+            if !local.is_empty() {
+                let batch = std::mem::take(&mut *local);
+                if let Ok(mut pending) = self.pending_batches.lock() {
+                    pending.push(batch);
+                }
+            }
+        });
+    }
+
+    fn flush(&self) {
+        if self
+            .flush_in_progress
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            self.cas_retries.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
+        let batches: Vec<HashMap<String, CommandStat>> = {
+            let mut pending = self.pending_batches.lock().unwrap();
+            std::mem::take(&mut *pending)
+        };
+
+        if batches.is_empty() {
+            self.flush_in_progress.store(false, Ordering::Release);
+            return;
+        }
+
+        self.phase_swaps.fetch_add(1, Ordering::Relaxed);
+
+        let mut snapshot = self.global_snapshot.lock().unwrap();
+        for batch in batches {
+            for (metric_key, stat) in batch {
+                snapshot
+                    .entry(metric_key)
+                    .or_insert_with(CommandStat::new)
+                    .merge(&stat);
+            }
+        }
+
+        self.records_since_flush.store(0, Ordering::Relaxed);
+        self.flush_in_progress.store(false, Ordering::Release);
+    }
+
+    fn snapshot(&self) -> Vec<(String, CommandStat)> {
+        self.flush();
+        self.push_local_batch();
+        self.flush();
+
+        let snapshot = self.global_snapshot.lock().unwrap();
+        snapshot
+            .iter()
+            .map(|(key, stat)| (key.clone(), stat.clone()))
+            .collect()
+    }
+
+    fn record_timer_trigger(&self) {
+        self.timer_trigger_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn count_trigger_hits(&self) -> u64 {
+        self.count_trigger_hits.load(Ordering::Relaxed)
+    }
+
+    fn timer_trigger_hits(&self) -> u64 {
+        self.timer_trigger_hits.load(Ordering::Relaxed)
+    }
+
+    fn phase_swaps(&self) -> u64 {
+        self.phase_swaps.load(Ordering::Relaxed)
+    }
+
+    fn cas_retries(&self) -> u64 {
+        self.cas_retries.load(Ordering::Relaxed)
     }
 }
 
@@ -591,7 +843,9 @@ pub struct CommandMetricsCollector {
     global_mutex: Option<GlobalMutexCollector>,
     sharded_2key: Option<Sharded2KeyCollector>,
     sharded_n: Option<ShardedNCollector>,
+    sharded_bucketed: Option<ShardedBucketedCollector>,
     thread_local: Option<Arc<ThreadLocalBatchedCollector>>,
+    thread_local_owned: Option<Arc<ThreadLocalOwnedCollector>>,
     hdr_histogram: Option<Arc<HdrHistogramCollector>>,
 }
 
@@ -599,27 +853,43 @@ pub type SharedCommandMetrics = Arc<CommandMetricsCollector>;
 
 impl CommandMetricsCollector {
     pub fn new(strategy: MetricsStrategy) -> SharedCommandMetrics {
-        let (global_mutex, sharded_2key, sharded_n, thread_local, hdr_histogram) = match strategy {
-            MetricsStrategy::Disabled => (None, None, None, None, None),
-            MetricsStrategy::GlobalMutex => (Some(GlobalMutexCollector::new()), None, None, None, None),
-            MetricsStrategy::Sharded2Key => (None, Some(Sharded2KeyCollector::new()), None, None, None),
-            MetricsStrategy::ShardedN => (None, None, Some(ShardedNCollector::new()), None, None),
-            MetricsStrategy::ThreadLocalBatched => {
-                (None, None, None, Some(Arc::new(ThreadLocalBatchedCollector::new())), None)
-            }
-            MetricsStrategy::HdrHistogram => {
-                (None, None, None, None, Some(Arc::new(HdrHistogramCollector::new())))
-            }
+        let mut collector = CommandMetricsCollector {
+            strategy,
+            global_mutex: None,
+            sharded_2key: None,
+            sharded_n: None,
+            sharded_bucketed: None,
+            thread_local: None,
+            thread_local_owned: None,
+            hdr_histogram: None,
         };
 
-        Arc::new(CommandMetricsCollector {
-            strategy,
-            global_mutex,
-            sharded_2key,
-            sharded_n,
-            thread_local,
-            hdr_histogram,
-        })
+        match strategy {
+            MetricsStrategy::Disabled => {}
+            MetricsStrategy::GlobalMutex => {
+                collector.global_mutex = Some(GlobalMutexCollector::new());
+            }
+            MetricsStrategy::Sharded2Key => {
+                collector.sharded_2key = Some(Sharded2KeyCollector::new());
+            }
+            MetricsStrategy::ShardedN => {
+                collector.sharded_n = Some(ShardedNCollector::new());
+            }
+            MetricsStrategy::ShardedBucketed => {
+                collector.sharded_bucketed = Some(ShardedBucketedCollector::new());
+            }
+            MetricsStrategy::ThreadLocalBatched => {
+                collector.thread_local = Some(Arc::new(ThreadLocalBatchedCollector::new()));
+            }
+            MetricsStrategy::ThreadLocalOwned => {
+                collector.thread_local_owned = Some(Arc::new(ThreadLocalOwnedCollector::new()));
+            }
+            MetricsStrategy::HdrHistogram => {
+                collector.hdr_histogram = Some(Arc::new(HdrHistogramCollector::new()));
+            }
+        }
+
+        Arc::new(collector)
     }
 
     /// Record a command execution.
@@ -645,8 +915,18 @@ impl CommandMetricsCollector {
                     collector.record(key_hint.unwrap_or(cmd_name), duration_us);
                 }
             }
+            MetricsStrategy::ShardedBucketed => {
+                if let Some(ref collector) = self.sharded_bucketed {
+                    collector.record(cmd_name, key_hint.unwrap_or(cmd_name), duration_us);
+                }
+            }
             MetricsStrategy::ThreadLocalBatched => {
                 if let Some(ref collector) = self.thread_local {
+                    collector.record(cmd_name, duration_us);
+                }
+            }
+            MetricsStrategy::ThreadLocalOwned => {
+                if let Some(ref collector) = self.thread_local_owned {
                     collector.record(cmd_name, duration_us);
                 }
             }
@@ -684,6 +964,16 @@ impl CommandMetricsCollector {
                 .unwrap_or_default(),
             MetricsStrategy::ShardedN => self
                 .sharded_n
+                .as_ref()
+                .map(|c| c.snapshot())
+                .unwrap_or_default(),
+            MetricsStrategy::ShardedBucketed => self
+                .sharded_bucketed
+                .as_ref()
+                .map(|c| c.snapshot())
+                .unwrap_or_default(),
+            MetricsStrategy::ThreadLocalOwned => self
+                .thread_local_owned
                 .as_ref()
                 .map(|c| c.snapshot())
                 .unwrap_or_default(),
@@ -727,6 +1017,10 @@ impl CommandMetricsCollector {
 
     pub fn hdr_histogram_collector(&self) -> Option<Arc<HdrHistogramCollector>> {
         self.hdr_histogram.clone()
+    }
+
+    pub fn thread_local_owned_collector(&self) -> Option<Arc<ThreadLocalOwnedCollector>> {
+        self.thread_local_owned.clone()
     }
 
     pub fn format_cmdstat(&self) -> String {
@@ -789,6 +1083,38 @@ impl CommandMetricsCollector {
                 output.push_str(&format!("sharded_n_shard_{}_keys:{}\r\n", idx, keys));
                 output.push_str(&format!("sharded_n_shard_{}_calls:{}\r\n", idx, calls));
             }
+        }
+
+        if let Some(ref collector) = self.sharded_bucketed {
+            output.push_str("\r\n# ShardedBucketed\r\n");
+            output.push_str(&format!(
+                "sharded_bucketed_configured_cardinality:{}\r\n",
+                collector.cardinality()
+            ));
+            output.push_str(&format!(
+                "sharded_bucketed_distinct_entries:{}\r\n",
+                collector.distinct_entries()
+            ));
+        }
+
+        if let Some(ref collector) = self.thread_local_owned {
+            output.push_str("\r\n# ThreadLocalOwnedFlush\r\n");
+            output.push_str(&format!(
+                "thread_local_owned_count_trigger_hits:{}\r\n",
+                collector.count_trigger_hits()
+            ));
+            output.push_str(&format!(
+                "thread_local_owned_timer_trigger_hits:{}\r\n",
+                collector.timer_trigger_hits()
+            ));
+            output.push_str(&format!(
+                "thread_local_owned_phase_swaps:{}\r\n",
+                collector.phase_swaps()
+            ));
+            output.push_str(&format!(
+                "thread_local_owned_cas_retries:{}\r\n",
+                collector.cas_retries()
+            ));
         }
 
         if let Some(ref collector) = self.thread_local {
@@ -856,6 +1182,17 @@ pub fn start_thread_local_flush_task(collector: Arc<ThreadLocalBatchedCollector>
 }
 
 pub fn start_hdr_flush_task(collector: Arc<HdrHistogramCollector>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+        loop {
+            interval.tick().await;
+            collector.record_timer_trigger();
+            collector.flush();
+        }
+    });
+}
+
+pub fn start_thread_local_owned_flush_task(collector: Arc<ThreadLocalOwnedCollector>) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
