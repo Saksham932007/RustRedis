@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Generate the two paper figures directly from rmit_analysis.json data.
 
-Figure 1: overhead % vs concurrency, 5 strategies, advanced dataset (10x
-pooled: 10 independent RMIT runs on 10 separately-provisioned Azure D8s_v6
-VMs, n=150 paired blocks per cell) -> figures/fig1_overhead_vs_concurrency.png
+Figure 1: overhead % vs concurrency, 5 strategies, advanced dataset (11x
+pooled: 11 independent RMIT runs of the same design - 10 on separately-
+provisioned Azure D8s_v6 VMs plus the original single validation run - n=165
+paired blocks per cell) -> figures/fig1_overhead_vs_concurrency.png
 
 Figure 2: overhead % by strategy, grouped by dataset (Azure D4s_v6 /
 Azure D8s_v6 advanced, pooled) -> figures/fig2_cross_dataset_ranking.png
 
-Figure 3: per-cell paired-ratio CI half-width, one run (n=15) vs the 10-run
-pool (n=150), same D8s_v6 design -> figures/fig3_ci_tightening.png
+Figure 3: per-cell paired-ratio CI half-width, one run (n=15) vs the 11-run
+pool (n=165), same D8s_v6 design -> figures/fig3_ci_tightening.png
 
 Every number plotted here is recomputed from raw_data_rmit.csv / rmit_analysis.json,
 never hand-copied from the paper's tables, so the figures and the tables are two
@@ -125,7 +126,7 @@ def figure1_overhead_vs_concurrency() -> None:
     ax.set_ylabel("Mean overhead vs. disabled (%)")
     ax.set_title(
         "Instrumentation overhead stays flat and small up to 3000 clients\n"
-        "(Azure D8s_v6, 10 pooled runs, n=150/cell, averaged over 3 workloads)",
+        "(Azure D8s_v6, 11 pooled runs, n=165/cell, averaged over 3 workloads)",
         fontsize=10.5,
     )
     ax.set_xscale("log")
@@ -144,7 +145,7 @@ def figure1_overhead_vs_concurrency() -> None:
 def figure2_cross_dataset_ranking() -> None:
     datasets = [
         ("Azure D4s_v6", "experiment_results_rmit_azure/rmit_analysis.json"),
-        ("Azure D8s_v6\n(advanced, 10x pooled)", "experiment_results_adv_pooled/rmit_analysis.json"),
+        ("Azure D8s_v6\n(advanced, 11x pooled)", "experiment_results_adv_pooled/rmit_analysis.json"),
     ]
 
     dataset_overhead: dict[str, dict[str, float]] = {}
@@ -202,24 +203,24 @@ def figure3_ci_tightening() -> None:
         return out
 
     hw_1x = half_widths("experiment_results_rmit_advanced/rmit_analysis.json")
-    hw_10x = half_widths("experiment_results_adv_pooled/rmit_analysis.json")
+    hw_11x = half_widths("experiment_results_adv_pooled/rmit_analysis.json")
 
     fig, ax = plt.subplots(figsize=(7.5, 4.8), dpi=200)
     n_bars = 2
     bar_width = 0.32
     x = range(len(STRATEGIES))
     means_1x = [mean(hw_1x[s]) for s in STRATEGIES]
-    means_10x = [mean(hw_10x[s]) for s in STRATEGIES]
+    means_11x = [mean(hw_11x[s]) for s in STRATEGIES]
     ax.bar([xi - bar_width / 2 for xi in x], means_1x, width=bar_width,
            color="#898781", label="1 run (n=15/cell)")
-    ax.bar([xi + bar_width / 2 for xi in x], means_10x, width=bar_width,
-           color="#2a78d6", hatch="//", edgecolor="white", label="10 runs pooled (n=150/cell)")
+    ax.bar([xi + bar_width / 2 for xi in x], means_11x, width=bar_width,
+           color="#2a78d6", hatch="//", edgecolor="white", label="11 runs pooled (n=165/cell)")
     ax.set_xticks(list(x))
     ax.set_xticklabels([LABELS[s] for s in STRATEGIES], rotation=15)
     ax.set_ylabel("Mean relative 95% CI half-width (%)")
     ax.set_title(
-        "Pooling 10 independent runs tightens throughput CIs on Azure D8s_v6\n"
-        "(same design, same VM size, 10x the paired-block sample size)",
+        "Pooling 11 independent runs tightens throughput CIs on Azure D8s_v6\n"
+        "(same design, same VM size, 11x the paired-block sample size)",
         fontsize=10.5,
     )
     ax.spines["top"].set_visible(False)

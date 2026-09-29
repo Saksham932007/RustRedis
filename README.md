@@ -12,16 +12,22 @@ Rust Redis-compatible server using **Randomized Multiple Interleaved Trials (RMI
 a technique proposed by Abedi, Heard & Brecht (2015) and shown necessary for cloud
 environments by
 [Abedi & Brecht, ICPE 2017](docs/paper_draft.md#1-motivation-and-related-work), not
-invented by this project — on two dedicated Azure VMs (3,600 runs, 192 configurations,
-100–3000 concurrent clients, three workload mixes). No two-state throughput pattern
-appears (0 of 192 configurations flagged) and run-to-run variability is low. Every
-strategy costs a small, consistent overhead — **at most ~2.3%** at any concurrency level
-(workload-averaged; single concurrency-by-workload cells reach 3.2%) — with ThreadLocal
-cheapest, Sharded-2key second, and Sharded-N costliest on average on both VMs; the design
-resolves differences of roughly 1–2%, so smaller gaps are unresolved rather than absent.
+invented by this project — on two dedicated Azure VM configurations: a single
+`Standard_D4s_v6` run, and `Standard_D8s_v6` run **eleven independent times** (ten
+separately-provisioned VMs across three Azure regions, plus the original validation
+run, pooled together) — **25,200 runs total**, 192 configurations, 100–3000 concurrent
+clients, three workload mixes. No two-state throughput pattern appears (0 of 192
+configurations flagged). Every strategy costs a small, consistent overhead — **at most
+~2.3%** at any concurrency level (workload-averaged; single concurrency-by-workload
+cells reach 2.5%) — with ThreadLocal, Sharded-2key, and GlobalMutex each pairwise
+resolved in that order (sign-test p≈0.001 for each adjacent pair across all 11 runs),
+and Sharded-N resolved as costliest (p≈0.012). The one gap that pooling did **not**
+resolve is GlobalMutex vs. HdrHistogram — it got *weaker*, not stronger, as more runs
+were added (p≈0.11 with 10 runs pooled → p≈0.23 with 11), a useful reminder that more
+data doesn't guarantee every comparison resolves in the expected direction.
 
-Full write-up, including related work and what this paper does and doesn't newly
-contribute: [docs/paper_draft.md](docs/paper_draft.md).
+Full write-up, including related work, the replication methodology, and what this
+paper does and doesn't newly contribute: [docs/paper_draft.md](docs/paper_draft.md).
 
 ## What is being compared
 
@@ -42,19 +48,24 @@ something else changing between runs.
 
 ## RMIT results (current)
 
-Two datasets, same design, different VM size and scope (a third, laptop dataset,
-`experiment_results_rmit/`, remains in the repository but is not part of the paper):
+Two VM configurations, same design, different VM size and replication depth (a third,
+laptop dataset, `experiment_results_rmit/`, remains in the repository but is not part
+of the paper):
 
 | Dataset | Hardware | Matrix | Runs | Notes |
 |---|---|---|---:|---|
-| [experiment_results_rmit_azure](experiment_results_rmit_azure) | Azure `Standard_D4s_v6` (4 vCPU, 16GB) | 6 strategies × 8 concurrency (100–1000) | 1,440 | First clean-room run — VM dedicated solely to this benchmark |
-| [experiment_results_rmit_advanced](experiment_results_rmit_advanced) | Azure `Standard_D8s_v6` (8 vCPU, 32GB) | 6 strategies × 8 concurrency (100–3000) × 3 workloads | 2,160 | Adds read-heavy/write-heavy workloads and a 3× wider concurrency range |
+| [experiment_results_rmit_azure](experiment_results_rmit_azure) | Azure `Standard_D4s_v6` (4 vCPU, 16GB) | 6 strategies × 8 concurrency (100–1000) | 1,440 | Single run — VM dedicated solely to this benchmark |
+| [experiment_results_adv_pooled](experiment_results_adv_pooled) | Azure `Standard_D8s_v6` (8 vCPU, 32GB) | 6 strategies × 8 concurrency (100–3000) × 3 workloads | 23,760 | **11 independent runs pooled** (2,160 each): [experiment_results_rmit_advanced](experiment_results_rmit_advanced) (original validation run) + [experiment_results_adv_iter_01](experiment_results_adv_iter_01) .. [_10](experiment_results_adv_iter_10) (10 more, on 4 VMs across 3 Azure regions) |
+
+`benchmarks/combine_iterations.py` builds the pooled dataset from its 11 constituent
+runs (offsetting each run's `block_id` so paired-block comparisons never mix runs from
+different VMs — see paper §4c).
 
 ### No two-state pattern
 
 The RMIT two-state detector (`benchmarks/analyze_rmit_results.py`) found **0 flagged
-configurations across both datasets** (0 of 48 on Azure D4s_v6, 0 of 144 on Azure
-D8s_v6 — 192 configurations total). The detector is a simple
+configurations across both datasets** (0 of 48 on Azure D4s_v6, 0 of 144 on the
+11-run-pooled Azure D8s_v6 dataset — 192 configurations total). The detector is a simple
 largest-gap heuristic, so this rules out large, well-separated state splits but not
 subtler multimodality (paper §5).
 
@@ -62,10 +73,14 @@ subtler multimodality (paper §5).
 
 Relative 95% bootstrap CI width on throughput (CI width ÷ median):
 
-| | Azure D4s_v6 | Azure D8s_v6 (advanced) |
+| | Azure D4s_v6 | Azure D8s_v6 (11 pooled) |
 |---|---:|---:|
-| Mean | 0.0091 | 0.0177 |
-| Max | 0.0175 | 0.0420 |
+| Mean | 0.0091 | 0.0194 |
+| Max | 0.0175 | 0.0552 |
+
+This particular statistic is *wider* on the pooled D8s_v6 dataset than on a single
+D8s_v6 run (0.0177) — pooling more runs does not automatically tighten every measure of
+spread; see "How much does pooling really help?" below and paper §4c.
 
 ### Instrumentation overhead: small and consistent, at most ~2.3% (workload-averaged)
 
@@ -73,61 +88,78 @@ Mean throughput overhead vs. `disabled`, paired within the same RMIT repetition 
 (the valid RMIT comparison — every strategy in a block saw the same machine-state
 conditions):
 
-| Strategy | Azure D4s_v6 | Azure D8s_v6 (advanced) |
+| Strategy | Azure D4s_v6 | Azure D8s_v6 (11 pooled) |
 |---|---:|---:|
-| ThreadLocal | 0.56% | 0.52% |
-| Sharded-2key | 0.85% | 0.94% |
-| GlobalMutex | 0.99% | 1.64% |
-| HdrHistogram | 1.42% | 1.53% |
-| Sharded-N | 1.60% | 1.98% |
+| ThreadLocal | 0.56% | 0.60% |
+| Sharded-2key | 0.85% | 0.90% |
+| GlobalMutex | 0.99% | 1.43% |
+| HdrHistogram | 1.42% | 1.47% |
+| Sharded-N | 1.60% | 1.77% |
 
-`ThreadLocal` is the cheapest strategy, `Sharded-2key` the second-cheapest, and
-`Sharded-N` the costliest on average on both VMs; `GlobalMutex` and `HdrHistogram` swap
-places and are not claimed to be resolved from each other (see the paper's §4b and §7).
-No strategy exceeds ~2.3% overhead at any concurrency level (workload-averaged; single
-concurrency-by-workload cells reach 3.2%), and the ranking never crosses over in a way
-that holds up against measurement noise (see below).
+`ThreadLocal` is cheapest, `Sharded-2key` second, and `GlobalMutex` third on both VM
+configurations — all three pairwise gaps hold in **11 of 11** individual D8s_v6 runs
+(sign-test p≈0.001 each). `Sharded-N` is costliest, holding in 10 of 11 runs (p≈0.012).
+`GlobalMutex` vs. `HdrHistogram` (ranks 3–4) is the one gap that stays unresolved: it
+agrees in direction in only 8 of 11 runs (p≈0.23) and the point-estimate gap (0.04
+percentage points) is below this design's own detectable-effect floor — see the paper's
+§4b/§4c/§7 for the full statistical treatment. No strategy exceeds ~2.3% overhead at
+any concurrency level (workload-averaged; single concurrency-by-workload cells reach
+2.5%), and the ranking never crosses over in a way that holds up against measurement
+noise (see below).
 
 ### Workload type doesn't change which strategy is cheapest
 
-The advanced dataset adds read-heavy (80/20) and write-heavy (20/80) workloads
-alongside the standard 50/50 mixed workload. ThreadLocal is cheapest and Sharded-2key
-second-cheapest in all three; Sharded-N is clearly most expensive in read-heavy and
-write-heavy, and is a statistical tie with GlobalMutex for most expensive in mixed
-(1.73% vs. 1.74% — below this design's minimum detectable effect, see
-[docs/paper_draft.md §7](docs/paper_draft.md#7-limitations)):
+The advanced design adds read-heavy (80/20) and write-heavy (20/80) workloads alongside
+the standard 50/50 mixed workload. ThreadLocal is cheapest and Sharded-2key
+second-cheapest in all three; GlobalMutex and HdrHistogram trade the rank-3/4 spot
+depending on workload (their gap is small and unresolved — see above), and Sharded-N is
+most expensive overall:
 
 | Strategy | Mixed | Read-heavy | Write-heavy |
 |---|---:|---:|---:|
-| ThreadLocal | 0.44% | 0.46% | 0.64% |
-| Sharded-2key | 1.11% | 0.87% | 0.83% |
-| HdrHistogram | 1.45% | 1.78% | 1.36% |
-| GlobalMutex | 1.74% | 1.40% | 1.79% |
-| Sharded-N | 1.73% | 2.15% | 2.07% |
+| ThreadLocal | 0.52% | 0.63% | 0.64% |
+| Sharded-2key | 0.86% | 0.95% | 0.89% |
+| GlobalMutex | 1.37% | 1.50% | 1.43% |
+| HdrHistogram | 1.49% | 1.56% | 1.38% |
+| Sharded-N | 1.73% | 1.87% | 1.72% |
 
 ### Graceful saturation, no cliff
 
-On the advanced (D8s_v6, up to 3000 clients) dataset, the `disabled` baseline (mixed
+On the pooled Azure D8s_v6 dataset (up to 3000 clients), the `disabled` baseline (mixed
 workload) degrades smoothly rather than collapsing:
 
 | Concurrency | Throughput (median) | p99 latency (median) |
 |---:|---:|---:|
-| 100 | ~280,000 ops/sec | 0.8 ms |
-| 3000 | ~235,000 ops/sec | 85.5 ms |
+| 100 | ~290,000 ops/sec | 0.76 ms |
+| 3000 | ~258,000 ops/sec | 79.4 ms |
 
-That's a ~16% throughput decline against a 30× increase in concurrent clients — the
-server is saturating gracefully, not falling over.
+That's roughly an 11% throughput decline against a 30× increase in concurrent clients —
+the server is saturating gracefully, not falling over.
 
 ### On the "crossovers"
 
 `analyze_rmit_results.py` also detects when the strategy with the highest median
-throughput changes across concurrency levels. It found 6 such "crossovers" in the
-advanced dataset — but since every strategy sits within ~2.3% of `disabled` at every
-concurrency level (workload-averaged), a leader change driven by sub-2% differences is exactly what
-measurement noise looks like, not a real strategy-concurrency interaction. We report the
-number because the tooling can now detect a genuine crossover if one exists, but the
-honest reading of this dataset is: no meaningful crossover, overhead is flat and small
-throughout.
+throughput changes across concurrency levels. A single D8s_v6 run found 6 such
+"crossovers"; pooling 10 runs found 4; **pooling all 11 finds 0.** Since every strategy
+sits within ~2.3% of `disabled` at every concurrency level (workload-averaged), the
+crossovers seen in smaller samples were sub-2% leader swaps — exactly what measurement
+noise looks like. The count falling monotonically as more independent data was added
+(6 → 4 → 0), rather than stabilizing on a nonzero number, is itself evidence the
+earlier crossovers were noise: a real crossover would be expected to survive more data.
+
+### How much does pooling really help?
+
+Not uniformly. The paired-ratio comparisons above (which cancel out shared per-block
+conditions before computing spread) tighten substantially with pooling — the
+detectable-effect floor drops from ~2.1% for one D8s_v6 run to ~0.6–0.75% for the
+11-run pool, roughly a 3x improvement, computed three ways (closed-form, a
+cluster-aware bound treating each run as one data point rather than each of its 15
+blocks, and an injected-effect simulation) that agree closely. But the simpler
+CI-width statistic above did not tighten — it widened — because it reflects genuine
+run-to-run variance that additional within-run samples can't shrink away, and the
+GlobalMutex-vs-HdrHistogram ranking gap got statistically *weaker*, not stronger, with
+the 11th run. See [docs/paper_draft.md §4c](docs/paper_draft.md#4c-how-much-replication-helps-and-how-to-account-for-it-correctly)
+for the full treatment, including why this happens and how to check for it.
 
 ### A methodological pitfall worth knowing
 
@@ -140,9 +172,9 @@ concurrency being tested, so every client connection failed silently. Fixed in
 
 ### Caveats
 
-- Both datasets are Azure VMs of the same family and region, so they replicate the
-  comparison across VM size and workload coverage but not across clouds or hardware
-  families.
+- Both VM configurations are the same Azure VM family and x86-64 OS image, so they
+  replicate the comparison across VM size, region (the D8s_v6 pool spans three Azure
+  regions), and workload coverage, but not across clouds or hardware families.
 - Client and server always share the same machine — at the highest concurrency levels
   this is a genuine thread-oversubscription stress test, not an isolated server
   measurement.
@@ -199,7 +231,7 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
 ## Legacy: v5/v12 (Apple M2, fixed order — superseded, not part of the paper)
 
 Kept in the repository for provenance only; the paper and the results above use only the
-Linux laptop and Azure VM RMIT datasets. v5 ran on Apple M2 hardware with only 4 of the
+Azure VM RMIT datasets. v5 ran on Apple M2 hardware with only 4 of the
 current 6 strategies (`Sharded-2key`, `Sharded-N`, and `HdrHistogram` were added later).
 
 | Strategy | Clients | Throughput Mean (ops/sec) | Throughput CV | p99 Mean (us) |
