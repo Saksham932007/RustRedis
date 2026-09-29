@@ -13,5 +13,7 @@ appendonly.aof*
 # rmit_analysis.json/csv, and metadata_rmit.json, but don't commit the
 # thousands of per-run server logs / benchmark JSON under run_data/.
 experiment_results_rmit*/run_data/
+experiment_results_adv_iter_*/run_data/
+experiment_results_adv_pooled/run_data/
 hardware_diag.csv
 /tmp/hardware_diag_bench_out/
