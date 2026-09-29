@@ -1,7 +1,7 @@
 # Follow-up experiment: splitting the confounded design axes
 
 This protocol runs the experiment that resolves the principal internal-validity
-threat in [paper_design_axes.md](paper_design_axes.md) §3.3 and §7.
+threat in [final_paper_v27.md](final_paper_v27.md) §3.3 and §7.
 
 ## What question this answers
 

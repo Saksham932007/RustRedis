@@ -669,12 +669,17 @@ CARD, and we do not fold it into the headline.
 
 ![Cost against live metric-map entries](figures/axes_fig4_cardinality_curve.png)
 
-**Figure 4.** Added cost as the live entry count sweeps 3.5 decades with
-per-operation work held constant. Plotted as the *paired* difference against
-the 2-entry configuration — the quantity actually tested — so the intervals
-shown are the ones the resolved/unresolved verdict rests on; each
-configuration's absolute cost carries a much wider interval dominated by
-between-run level differences that the paired form cancels.
+**Figure 4.** Cost as the live entry count sweeps 3.5 decades with
+per-operation work held constant, shown two ways from the same data.
+**(a)** the *paired* difference against the 2-entry configuration — the
+quantity actually tested, and the intervals the resolved/unresolved verdict
+rests on. **(b)** each configuration's absolute cost. Panel (b) is included
+because reading it alone invites a specific error: its intervals overlap
+between adjacent cardinalities, which resembles "no difference", but
+overlapping intervals are not a test of a difference. The two forms have
+broadly similar interval widths here; the paired comparison wins by removing
+the baseline instrumentation cost common to every cardinality, not by being
+tighter.
 
 | Data entries | Cost vs `disabled` | vs 2 entries | |
 |---:|---:|---|---|

@@ -69,7 +69,7 @@ BASE_STRATEGIES: List[StrategySpec] = [
     StrategySpec("sharded_n", "sharded_n", "Sharded-N"),
 ]
 
-#: Strategies added for the axis-decomposition follow-up (docs/paper_design_axes.md
+#: Strategies added for the axis-decomposition follow-up (docs/final_paper_v27.md
 #: section 7). They separate costs the original six confound:
 #:   thread_local_owned  - isolates owned-key allocation from the histogram payload
 #:   sharded_bucketed    - isolates map cardinality from everything else; its
@@ -121,7 +121,7 @@ def parse_args() -> argparse.Namespace:
         "--strategies",
         default="base",
         help="Which strategies to run: 'base' (the original six), 'decomposition' "
-             "(the axis-decomposition set for docs/paper_design_axes.md section 7), "
+             "(the axis-decomposition set for docs/final_paper_v27.md section 7), "
              "'all', or an explicit comma-separated list of strategy keys.",
     )
     p.add_argument(
