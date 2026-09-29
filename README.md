@@ -232,7 +232,7 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
 
 ## Documentation
 
-- [docs/paper_design_axes.md](docs/paper_design_axes.md): **"Cardinality Before
+- [docs/final_paper_v27.md](docs/final_paper_v27.md): **"Cardinality Before
   Contention"** — the design-axis decomposition paper. Prices synchronization,
   cardinality, aggregation, and payload separately, and finds that metric
   cardinality costs 1.66x what the global-lock-to-sharded-map transition saves,

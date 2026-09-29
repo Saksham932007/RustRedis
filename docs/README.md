@@ -3,7 +3,7 @@
 Two papers are written from the same experimental data, answering different
 questions:
 
-- [paper_design_axes.md](paper_design_axes.md): **"Cardinality Before
+- [final_paper_v27.md](final_paper_v27.md): **"Cardinality Before
   Contention"** — decomposes observability overhead into four design axes
   (synchronization, cardinality, aggregation, payload) and shows the
   cardinality axis dominates the synchronization axis, that the axes scale with

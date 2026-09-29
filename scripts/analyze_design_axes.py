@@ -2,7 +2,7 @@
 """Factorial decomposition of per-command observability overhead into design axes.
 
 This script produces every number quoted in the design-axis paper
-(docs/paper_design_axes.md). It re-derives them from the committed raw CSVs,
+(docs/final_paper_v27.md). It re-derives them from the committed raw CSVs,
 so `python3 scripts/analyze_design_axes.py` regenerates the paper's tables.
 
 Background

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Figures for the design-axis paper (docs/paper_design_axes.md).
+"""Figures for the design-axis paper (docs/final_paper_v27.md).
 
 Every value plotted is recomputed here by importing the same helper functions
 that scripts/analyze_design_axes.py uses for its tables, so the figures and the
@@ -237,13 +237,21 @@ FOLLOWUP = ROOT / "experiments" / "azure_d8s_v6_followup" / "pooled" / "raw_data
 
 
 def figure4() -> None:
-    """Paired cost increase vs the 2-entry reference, as entry count sweeps.
+    """Cardinality curve, shown two ways.
 
-    Plots the PAIRED difference against the C=1 configuration, not each
-    configuration's absolute cost. That is the quantity actually tested: the
-    paired form cancels each run's level, so its interval is far tighter than
-    the absolute cost's and the resolved/unresolved verdict matches the bars a
-    reader sees.
+    (a) The PAIRED difference against the 2-entry configuration -- the quantity
+        actually tested, whose interval the resolved/unresolved verdict rests on.
+    (b) Each configuration's ABSOLUTE cost -- the magnitude a practitioner
+        budgets against.
+
+    Both are plotted because reading (b) alone invites a specific error. The
+    absolute intervals overlap heavily between adjacent cardinalities, which
+    looks like "no difference" -- but overlapping intervals are not a test of a
+    difference, and the paired comparison in (a), which cancels each run's
+    level before differencing, resolves the same effect cleanly. The two panels
+    carry the same data; only (a) is a hypothesis test. (The intervals are of
+    broadly similar width: the paired form wins by removing the shared baseline
+    cost, not by being tighter.)
     """
     if not FOLLOWUP.exists():
         print("  (skipping figure 4: follow-up dataset not present)")
@@ -252,42 +260,63 @@ def figure4() -> None:
     # data-plane entries = achieved - 2 control-plane entries (PING, CMDSTAT)
     points = [(1, 2), (10, 20), (100, 200), (1000, 2000), (10000, 13040)]
     base = "sharded_bucketed_c1"
-    xs, ys, los, his = [], [], [], []
-    for c, entries in points:
+    ent = [e for _, e in points]
+
+    paired, abso = [], []
+    for c, _ in points:
         cfg = f"sharded_bucketed_c{c}"
+        a = cluster_ci(by_run(blocks, lambda b, cfg=cfg: cost(b, cfg, "throughput")))
+        abso.append(a)
         if cfg == base:
-            xs.append(entries); ys.append(0.0); los.append(0.0); his.append(0.0)
-            continue
-        m, lo, hi = cluster_ci(by_run(blocks, contrast_fn(cfg, base, "throughput")))
-        xs.append(entries); ys.append(m); los.append(m - lo); his.append(hi - m)
+            paired.append((0.0, 0.0, 0.0))
+        else:
+            paired.append(cluster_ci(by_run(blocks, contrast_fn(cfg, base, "throughput"))))
 
-    fig, ax = plt.subplots(figsize=(7.4, 4.0))
-    ax.axhline(0, color="#898781", linewidth=1.2, zorder=1)
-    ax.axvspan(1.4, 1000, color="#e1e0d9", alpha=0.55, zorder=0)
-    ax.errorbar(xs, ys, yerr=[los, his], fmt="-", marker="o", color=AXIS_COLOR["CARD"],
-                linewidth=2, markersize=8, markeredgecolor="white", markeredgewidth=1.4,
-                ecolor=AXIS_COLOR["CARD"], elinewidth=1.4, capsize=4, zorder=3)
-    for x, y, h in zip(xs[1:], ys[1:], his[1:]):
-        ax.annotate(f"+{y:.2f}", (x, y + h), textcoords="offset points", xytext=(0, 7),
-                    ha="center", fontsize=9.5, color="#0b0b0b")
+    fig, (axa, axb) = plt.subplots(1, 2, figsize=(10.2, 4.1))
 
-    ax.set_xscale("log")
-    ax.set_xticks([x for _, x in points])
-    ax.set_xticklabels([f"{x:,}" for _, x in points], fontsize=9.5)
-    ax.minorticks_off()
-    ax.annotate("intervals span zero:\nno measurable cost", xy=(45, -0.30), ha="center",
-                fontsize=9.5, color="#52514e")
-    ax.annotate("resolved", xy=(5200, -0.30), ha="center", fontsize=9.5,
-                color=AXIS_COLOR["CARD"], fontweight="medium")
+    # (a) paired difference -- the tested quantity
+    ys = [v[0] for v in paired]
+    lo = [v[0] - v[1] for v in paired]
+    hi = [v[2] - v[0] for v in paired]
+    axa.axhline(0, color="#898781", linewidth=1.2, zorder=1)
+    axa.axvspan(1.4, 1000, color="#e1e0d9", alpha=0.55, zorder=0)
+    axa.errorbar(ent, ys, yerr=[lo, hi], fmt="-", marker="o", color=AXIS_COLOR["CARD"],
+                 linewidth=2, markersize=8, markeredgecolor="white", markeredgewidth=1.4,
+                 ecolor=AXIS_COLOR["CARD"], elinewidth=1.4, capsize=4, zorder=3)
+    for x, y, h in zip(ent[1:], ys[1:], hi[1:]):
+        axa.annotate(f"+{y:.2f}", (x, y + h), textcoords="offset points", xytext=(0, 7),
+                     ha="center", fontsize=9.5, color="#0b0b0b")
+    axa.annotate("spans zero", xy=(45, -0.33), ha="center", fontsize=9.5, color="#52514e")
+    axa.annotate("resolved", xy=(5200, -0.33), ha="center", fontsize=9.5,
+                 color=AXIS_COLOR["CARD"], fontweight="medium")
+    axa.set_ylabel("added cost vs the 2-entry case (pp)")
+    axa.set_ylim(-0.6, 1.3)
+    axa.set_title("(a) paired against the 2-entry case\n— the quantity tested",
+                  fontsize=10.5, loc="left")
 
-    ax.set_xlabel("live metric-map entries (log scale) — per-operation work identical throughout")
-    ax.set_ylabel("added cost vs the 2-entry case (pp, paired)")
-    ax.set_xlim(1.4, 22000)
-    ax.set_ylim(-0.55, 1.25)
-    ax.set_title("Metric cardinality only starts costing above ~10$^3$ entries\n"
-                 "Azure D8s_v6, 8 independent runs; paired against the 2-entry "
-                 "configuration, 95% CIs clustered on runs",
-                 fontsize=11, loc="left", pad=10)
+    # (b) absolute cost -- the magnitude, with its much wider interval
+    ys2 = [v[0] for v in abso]
+    lo2 = [v[0] - v[1] for v in abso]
+    hi2 = [v[2] - v[0] for v in abso]
+    axb.axvspan(1.4, 1000, color="#e1e0d9", alpha=0.55, zorder=0)
+    axb.errorbar(ent, ys2, yerr=[lo2, hi2], fmt="--", marker="s", color=AXIS_COLOR["PAYLOAD"],
+                 linewidth=2, markersize=7, markeredgecolor="white", markeredgewidth=1.4,
+                 ecolor=AXIS_COLOR["PAYLOAD"], elinewidth=1.4, capsize=4, zorder=3)
+    axb.set_ylabel("cost vs `disabled` (%)")
+    axb.set_ylim(1.1, 2.9)
+    axb.set_title("(b) absolute cost — same data;\noverlapping bars are not a test",
+                  fontsize=10.5, loc="left")
+
+    for ax in (axa, axb):
+        ax.set_xscale("log")
+        ax.set_xticks(ent)
+        ax.set_xticklabels([f"{e:,}" for e in ent], fontsize=9)
+        ax.minorticks_off()
+        ax.set_xlim(1.4, 22000)
+        ax.set_xlabel("live metric-map entries (log)")
+
+    fig.suptitle("Metric cardinality only starts costing above ~10$^3$ entries",
+                 fontsize=11.5, x=0.012, ha="left", y=1.02)
     fig.tight_layout()
     out = FIG_DIR / "axes_fig4_cardinality_curve.png"
     fig.savefig(out, dpi=200, bbox_inches="tight")
