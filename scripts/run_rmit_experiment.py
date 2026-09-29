@@ -47,9 +47,20 @@ class StrategySpec:
     key: str
     env_value: str
     label: str
+    #: Metric cardinality for `sharded_bucketed` (RUSTREDIS_METRICS_CARDINALITY).
+    #: None for every other strategy, whose cardinality is fixed by its design.
+    cardinality: Optional[int] = None
+
+    @property
+    def config_id(self) -> str:
+        """Unique id for this configuration, including cardinality when set."""
+        return self.key if self.cardinality is None else f"{self.key}_c{self.cardinality}"
 
 
-STRATEGIES: List[StrategySpec] = [
+#: The six strategies of the original design. Changing this list would change
+#: what every committed dataset means, so new strategies are opt-in via
+#: --strategies rather than appended here.
+BASE_STRATEGIES: List[StrategySpec] = [
     StrategySpec("disabled", "disabled", "Disabled"),
     StrategySpec("global_mutex", "global_mutex", "GlobalMutex"),
     StrategySpec("sharded_2key", "sharded_2key", "Sharded-2key"),
@@ -57,7 +68,27 @@ STRATEGIES: List[StrategySpec] = [
     StrategySpec("hdr_histogram", "hdr_histogram", "HdrHistogram"),
     StrategySpec("sharded_n", "sharded_n", "Sharded-N"),
 ]
-STRATEGY_BY_KEY = {s.key: s for s in STRATEGIES}
+
+#: Strategies added for the axis-decomposition follow-up (docs/paper_design_axes.md
+#: section 7). They separate costs the original six confound:
+#:   thread_local_owned  - isolates owned-key allocation from the histogram payload
+#:   sharded_bucketed    - isolates map cardinality from everything else; its
+#:                         cardinality is set per-configuration via --cardinalities
+EXTRA_STRATEGIES: List[StrategySpec] = [
+    StrategySpec("thread_local_owned", "thread_local_owned", "ThreadLocal-Owned"),
+    StrategySpec("sharded_bucketed", "sharded_bucketed", "Sharded-Bucketed"),
+]
+
+ALL_STRATEGIES: List[StrategySpec] = BASE_STRATEGIES + EXTRA_STRATEGIES
+STRATEGY_BY_KEY = {s.key: s for s in ALL_STRATEGIES}
+
+#: The configuration set for the axis-decomposition batch. `sharded_bucketed`
+#: is expanded across --cardinalities; the rest appear once.
+DECOMPOSITION_STRATEGY_KEYS = [
+    "disabled", "sharded_2key", "sharded_bucketed",
+    "thread_local", "thread_local_owned", "hdr_histogram",
+]
+DEFAULT_CARDINALITIES = [1, 10, 100, 1000, 10000]
 
 # Scaled down from the v12 macOS matrix (100..1000, 30 reps) for a 2c/4t,
 # 8GB laptop. Override with --concurrency / --runs for stronger hardware.
@@ -86,6 +117,21 @@ def parse_args() -> argparse.Namespace:
              "Adding more than one makes this a 3-D design: strategy x concurrency x workload, "
              "shuffled together per repetition.",
     )
+    p.add_argument(
+        "--strategies",
+        default="base",
+        help="Which strategies to run: 'base' (the original six), 'decomposition' "
+             "(the axis-decomposition set for docs/paper_design_axes.md section 7), "
+             "'all', or an explicit comma-separated list of strategy keys.",
+    )
+    p.add_argument(
+        "--cardinalities",
+        default=",".join(str(c) for c in DEFAULT_CARDINALITIES),
+        help="Comma-separated metric cardinalities to run `sharded_bucketed` at. "
+             "Each becomes its own configuration in the RMIT shuffle. Ignored "
+             "unless sharded_bucketed is among the selected strategies. Note the "
+             "achieved entry count is capped by --key-space (see docs).",
+    )
     p.add_argument("--inter-run-cooldown-secs", type=float, default=2.0)
     p.add_argument("--run-retry-limit", type=int, default=3)
     p.add_argument("--port", type=int, default=6379)
@@ -101,8 +147,103 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def resolve_strategies(selection: str, cardinalities: Sequence[int]) -> List[StrategySpec]:
+    """Expand the --strategies selection into concrete configurations.
+
+    `sharded_bucketed` is expanded into one configuration per requested
+    cardinality; every other strategy contributes exactly one.
+    """
+    selection = selection.strip().lower()
+    if selection == "base":
+        keys = [s.key for s in BASE_STRATEGIES]
+    elif selection == "decomposition":
+        keys = list(DECOMPOSITION_STRATEGY_KEYS)
+    elif selection == "all":
+        keys = [s.key for s in ALL_STRATEGIES]
+    else:
+        keys = [k.strip() for k in selection.split(",") if k.strip()]
+
+    resolved: List[StrategySpec] = []
+    for key in keys:
+        if key not in STRATEGY_BY_KEY:
+            raise SystemExit(
+                f"Unknown strategy '{key}'. Known: {sorted(STRATEGY_BY_KEY)}"
+            )
+        spec = STRATEGY_BY_KEY[key]
+        if key == "sharded_bucketed":
+            if not cardinalities:
+                raise SystemExit("sharded_bucketed selected but --cardinalities is empty")
+            for card in cardinalities:
+                resolved.append(
+                    StrategySpec(spec.key, spec.env_value, f"{spec.label}-{card}", card)
+                )
+        else:
+            resolved.append(spec)
+    return resolved
+
+
 def run_text(cmd: Sequence[str], cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(list(cmd), cwd=cwd, capture_output=True, text=True, check=check)
+
+
+def read_metric_entry_count(port: int) -> str:
+    """Ask the server how many distinct metric entries it actually holds.
+
+    Read back from CMDSTAT after the measured run so the analysis can key off
+    the cardinality the server really reached rather than the one requested
+    (they diverge when --key-space caps the reachable bucket count). Returns ""
+    if the server reports nothing (e.g. the `disabled` strategy).
+
+    CMDSTAT replies with a single RESP bulk string that can run to hundreds of
+    kilobytes at high cardinality, and the summary line we want is emitted
+    *after* all the per-entry lines — so the declared bulk length is parsed and
+    read to completion rather than stopping at the first short recv.
+    """
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=5.0) as sock:
+            sock.settimeout(5.0)
+            sock.sendall(b"*1\r\n$7\r\nCMDSTAT\r\n")
+            buf = b""
+            # Read the "$<len>\r\n" header first.
+            while b"\r\n" not in buf:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    return ""
+                buf += chunk
+            header, _, rest = buf.partition(b"\r\n")
+            if not header.startswith(b"$"):
+                return ""
+            declared = int(header[1:])
+            if declared < 0:
+                return ""
+            while len(rest) < declared:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                rest += chunk
+            text = rest[:declared].decode("utf-8", errors="replace")
+    except (OSError, ValueError):
+        return ""
+
+    # Preferred: the collector states its own entry count.
+    for line in text.splitlines():
+        if line.startswith("sharded_bucketed_distinct_entries:"):
+            return line.split(":", 1)[1].strip()
+
+    # Otherwise count per-entry stat lines, adding back any the server elided
+    # (it prints at most CMDSTAT_MAX_LINES and then reports the remainder).
+    entries = sum(
+        1 for l in text.splitlines() if l.startswith("cmdstat_") and "calls=" in l
+    )
+    for line in text.splitlines():
+        if line.startswith("cmdstat_truncated_entries:"):
+            try:
+                entries += int(line.split(":", 1)[1].strip())
+            except ValueError:
+                pass
+    return str(entries) if entries else ""
 
 
 def redis_ping(root_dir: Path, port: int) -> bool:
@@ -161,6 +302,8 @@ def start_server(
     env["TOKIO_WORKER_THREADS"] = str(worker_threads)
     env["RUSTREDIS_METRICS_STRATEGY"] = strategy.env_value
     env["RUSTREDIS_DISABLE_AOF"] = "1"
+    if strategy.cardinality is not None:
+        env["RUSTREDIS_METRICS_CARDINALITY"] = str(strategy.cardinality)
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_handle = log_path.open("w", encoding="utf-8")
@@ -312,6 +455,18 @@ def main() -> None:
         if w not in VALID_WORKLOADS:
             raise SystemExit(f"Invalid workload '{w}'; must be one of {VALID_WORKLOADS}")
 
+    cardinalities = [int(c.strip()) for c in args.cardinalities.split(",") if c.strip()]
+    strategies = resolve_strategies(args.strategies, cardinalities)
+
+    # A requested cardinality above --key-space cannot be reached: the bucket is
+    # hash(logical key) % cardinality, so at most --key-space distinct buckets
+    # ever exist. Warn rather than fail, and record what was actually achieved.
+    over = [c for c in cardinalities if c > args.key_space]
+    if over and any(sp.key == "sharded_bucketed" for sp in strategies):
+        print(f"WARNING: requested cardinalities {over} exceed --key-space "
+              f"({args.key_space}); achieved entry counts will saturate there. "
+              f"The 'achieved_metric_entries' column records the real value.")
+
     try:
         import resource
         soft_fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -334,6 +489,20 @@ def main() -> None:
     raw_rows_path = output_dir / "raw_data_rmit.csv"
     fieldnames = [
         "block_id", "order_in_block", "strategy", "strategy_label", "concurrency", "workload", "run_id",
+        # `metric_cardinality` is the REQUESTED cardinality (empty for strategies
+        # whose cardinality is fixed by design); `achieved_metric_entries` is what
+        # the server actually held, read back from CMDSTAT after the run. They
+        # differ when --key-space caps the reachable bucket count, so the analysis
+        # should key off the achieved value.
+        #
+        # The achieved count includes exactly TWO control-plane entries beyond the
+        # data-plane ones: the harness's own PING health check and the CMDSTAT read
+        # itself. Neither carries a key hint, so each occupies a single bucket at
+        # every cardinality. Data-plane entries are therefore
+        # `achieved_metric_entries - 2` (verified: cardinality 10 -> 22 = 2*10 + 2,
+        # 100 -> 202, 1000 -> 1964). Their throughput contribution is a handful of
+        # operations against millions and is identical across strategies.
+        "metric_cardinality", "achieved_metric_entries",
         "throughput", "p50", "p99", "avg_latency", "latency_stddev", "latency_cv", "errors",
         "warmup_ops_per_client", "measured_ops_per_client",
     ] + system_state.STATE_FIELDNAMES
@@ -345,14 +514,16 @@ def main() -> None:
     if raw_rows_path.exists():
         with raw_rows_path.open("r", newline="", encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
+                card = row.get("metric_cardinality") or ""
+                config_id = row["strategy"] if card == "" else f"{row['strategy']}_c{card}"
                 already_done.add((
-                    int(row["block_id"]), row["strategy"], int(row["concurrency"]),
+                    int(row["block_id"]), config_id, int(row["concurrency"]),
                     row.get("workload", "mixed"),
                 ))
 
     total_blocks = args.runs
-    total_configs = len(STRATEGIES) * len(concurrency_levels) * len(workloads)
-    print(f"RMIT runner: {len(STRATEGIES)} strategies x {len(concurrency_levels)} concurrency levels "
+    total_configs = len(strategies) * len(concurrency_levels) * len(workloads)
+    print(f"RMIT runner: {len(strategies)} strategy configs x {len(concurrency_levels)} concurrency levels "
           f"x {len(workloads)} workloads x {total_blocks} repetitions = {total_configs * total_blocks} runs")
     print(f"Concurrency levels: {concurrency_levels}")
     print(f"Workloads: {workloads}")
@@ -367,20 +538,20 @@ def main() -> None:
     try:
         for block_id in range(1, total_blocks + 1):
             triples: List[Tuple[StrategySpec, int, str]] = [
-                (s, c, w) for s in STRATEGIES for c in concurrency_levels for w in workloads
+                (s, c, w) for s in strategies for c in concurrency_levels for w in workloads
             ]
             rng.shuffle(triples)  # fresh random order every repetition (RMIT core requirement)
 
             print(f"\n=== Block {block_id}/{total_blocks} (shuffled order of {len(triples)} configs) ===")
 
             for order_in_block, (strategy, concurrency, workload) in enumerate(triples, start=1):
-                key = (block_id, strategy.key, concurrency, workload)
+                key = (block_id, strategy.config_id, concurrency, workload)
                 if key in already_done:
                     print(f"  [{order_in_block:>3}/{len(triples)}] {strategy.key}/c{concurrency}/{workload} "
                           f"(block {block_id}) — already recorded, skipping")
                     continue
 
-                cfg_dir = run_data_root / f"block{block_id}" / f"{strategy.key}_c{concurrency}_{workload}"
+                cfg_dir = run_data_root / f"block{block_id}" / f"{strategy.config_id}_c{concurrency}_{workload}"
 
                 state = system_state.snapshot()
 
@@ -419,6 +590,10 @@ def main() -> None:
                                 "order_in_block": order_in_block,
                                 "strategy": strategy.key,
                                 "strategy_label": strategy.label,
+                                "metric_cardinality": (
+                                    "" if strategy.cardinality is None else strategy.cardinality
+                                ),
+                                "achieved_metric_entries": read_metric_entry_count(args.port),
                                 "concurrency": concurrency,
                                 "workload": workload,
                                 "run_id": attempt,
@@ -426,7 +601,7 @@ def main() -> None:
                                 **state,
                             }
                             break
-                        last_error = f"block={block_id} {strategy.key}/c{concurrency}/{workload} attempt={attempt} rc={rc}"
+                        last_error = f"block={block_id} {strategy.config_id}/c{concurrency}/{workload} attempt={attempt} rc={rc}"
                         time.sleep(args.inter_run_cooldown_secs)
                 finally:
                     stop_server(server_proc, log_handle)
@@ -438,7 +613,7 @@ def main() -> None:
                 csv_file.flush()
 
                 print(
-                    f"  [{order_in_block:>3}/{len(triples)}] {strategy.key:14s} c={concurrency:<4} {workload:12s} "
+                    f"  [{order_in_block:>3}/{len(triples)}] {strategy.config_id:22s} c={concurrency:<4} {workload:12s} "
                     f"{row['throughput']:>9.0f} ops/sec  p99={row['p99']:>8.0f}us  "
                     f"cpu={state.get('cpu_freq_mean_mhz')}MHz temp={state.get('temp_max_celsius')}C "
                     f"load1={state.get('load_1m')} ac={state.get('ac_online')}"
@@ -457,7 +632,11 @@ def main() -> None:
         "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "machine_specs": machine_specs,
         "runtime_config": {
-            "strategies": [s.label for s in STRATEGIES],
+            "strategies": [s.label for s in strategies],
+            "strategy_config_ids": [s.config_id for s in strategies],
+            "metric_cardinalities": sorted(
+                {s.cardinality for s in strategies if s.cardinality is not None}
+            ),
             "concurrency_levels": concurrency_levels,
             "workloads": workloads,
             "repetitions": args.runs,

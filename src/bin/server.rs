@@ -55,6 +55,16 @@ async fn main() -> Result<()> {
         info!("Thread-local metrics flush task started (100ms interval)");
     }
 
+    // Start background flush task for ThreadLocalOwned strategy. This must run
+    // on the same 100ms cadence as the HdrHistogram task, since the two
+    // strategies are compared against each other to price the histogram payload
+    // (docs/paper_design_axes.md): a difference in flush cadence would show up
+    // as a difference in payload cost.
+    if let Some(tlo_collector) = command_metrics.thread_local_owned_collector() {
+        command_metrics::start_thread_local_owned_flush_task(tlo_collector);
+        info!("Thread-local (owned-key) metrics flush task started (100ms interval)");
+    }
+
     // Start background flush task for HdrHistogram strategy
     if let Some(hdr_collector) = command_metrics.hdr_histogram_collector() {
         command_metrics::start_hdr_flush_task(hdr_collector);
