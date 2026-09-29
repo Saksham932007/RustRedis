@@ -48,22 +48,20 @@ something else changing between runs.
 
 ## RMIT results (current)
 
-Two VM configurations, same design, different VM size and replication depth (a third,
-laptop dataset, `experiment_results_rmit/`, remains in the repository but is not part
-of the paper):
+Two VM configurations, same design, different VM size and replication depth:
 
 | Dataset | Hardware | Matrix | Runs | Notes |
 |---|---|---|---:|---|
-| [experiment_results_rmit_azure](experiment_results_rmit_azure) | Azure `Standard_D4s_v6` (4 vCPU, 16GB) | 6 strategies × 8 concurrency (100–1000) | 1,440 | Single run — VM dedicated solely to this benchmark |
-| [experiment_results_adv_pooled](experiment_results_adv_pooled) | Azure `Standard_D8s_v6` (8 vCPU, 32GB) | 6 strategies × 8 concurrency (100–3000) × 3 workloads | 23,760 | **11 independent runs pooled** (2,160 each): [experiment_results_rmit_advanced](experiment_results_rmit_advanced) (original validation run) + [experiment_results_adv_iter_01](experiment_results_adv_iter_01) .. [_10](experiment_results_adv_iter_10) (10 more, on 4 VMs across 3 Azure regions) |
+| [experiments/azure_d4s_v6](experiments/azure_d4s_v6) | Azure `Standard_D4s_v6` (4 vCPU, 16GB) | 6 strategies × 8 concurrency (100–1000) | 1,440 | Single run — VM dedicated solely to this benchmark |
+| [experiments/azure_d8s_v6/pooled](experiments/azure_d8s_v6/pooled) | Azure `Standard_D8s_v6` (8 vCPU, 32GB) | 6 strategies × 8 concurrency (100–3000) × 3 workloads | 23,760 | **11 independent runs pooled** (2,160 each): [experiments/azure_d8s_v6/run_00](experiments/azure_d8s_v6/run_00) (original validation run) + [run_01](experiments/azure_d8s_v6/run_01) .. [run_10](experiments/azure_d8s_v6/run_10) (10 more, on 4 VMs across 3 Azure regions) |
 
-`benchmarks/combine_iterations.py` builds the pooled dataset from its 11 constituent
+`scripts/combine_iterations.py` builds the pooled dataset from its 11 constituent
 runs (offsetting each run's `block_id` so paired-block comparisons never mix runs from
 different VMs — see paper §4c).
 
 ### No two-state pattern
 
-The RMIT two-state detector (`benchmarks/analyze_rmit_results.py`) found **0 flagged
+The RMIT two-state detector (`scripts/analyze_rmit_results.py`) found **0 flagged
 configurations across both datasets** (0 of 48 on Azure D4s_v6, 0 of 144 on the
 11-run-pooled Azure D8s_v6 dataset — 192 configurations total). The detector is a simple
 largest-gap heuristic, so this rules out large, well-separated state splits but not
@@ -167,7 +165,7 @@ The first attempt at the advanced dataset silently reported exactly `0 ops/sec` 
 every run above ~1000 concurrent clients — no crash, no error, a validly-formed result.
 Cause: the default open-file-descriptor limit (1024) on a fresh VM was far below the
 concurrency being tested, so every client connection failed silently. Fixed in
-`benchmarks/run_rmit_experiment.py` (`raise_fd_limit()`); see
+`scripts/run_rmit_experiment.py` (`raise_fd_limit()`); see
 [docs/paper_draft.md](docs/paper_draft.md) §3 for the full story.
 
 ### Caveats
@@ -195,8 +193,8 @@ cargo build --release --manifest-path benchmarks/Cargo.toml
 ### 2. Run the RMIT experiment
 
 ```bash
-python3 benchmarks/run_rmit_experiment.py --output-dir experiment_results_rmit_local
-python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit_local/raw_data_rmit.csv
+python3 scripts/run_rmit_experiment.py --output-dir experiments/output
+python3 scripts/analyze_rmit_results.py --input experiments/output/raw_data_rmit.csv
 ```
 
 Read [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md) first — it has
@@ -218,42 +216,26 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
   --output-dir results/manual_run
 ```
 
+## Repository layout
+
+```
+.
+├── src/                  Server (Rust): commands, storage backends, metrics strategies
+├── benchmarks/           Load-generator crate (rustredis-bench)
+├── scripts/              Experiment runner, analysis, pooling, and figure scripts
+├── experiments/          Azure VM datasets (raw CSV + analysis outputs)
+│   ├── azure_d4s_v6/     Standard_D4s_v6, single run
+│   └── azure_d8s_v6/     Standard_D8s_v6: run_00 .. run_10 + pooled/ (11 runs)
+├── docs/                 Paper draft, protocol, design notes, figures
+└── LICENSE
+```
+
 ## Documentation
 
-- [docs/paper_draft.md](docs/paper_draft.md): full write-up with all three RMIT datasets
-- [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md): current experiment protocol (laptop + cloud-VM paths)
+- [docs/paper_draft.md](docs/paper_draft.md): full write-up
+- [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md): experiment protocol and Azure VM setup
 - [docs/system-design.md](docs/system-design.md)
 - [docs/failure-analysis.md](docs/failure-analysis.md)
-- [repo_structure.md](repo_structure.md): compact repository map
-- [docs/macos_m2_experiment_protocol.md](docs/macos_m2_experiment_protocol.md): superseded, kept for provenance (M2 hardware)
-- [docs/legacy_docs_archive.md](docs/legacy_docs_archive.md)
-
-## Legacy: v5/v12 (Apple M2, fixed order — superseded, not part of the paper)
-
-Kept in the repository for provenance only; the paper and the results above use only the
-Azure VM RMIT datasets. v5 ran on Apple M2 hardware with only 4 of the
-current 6 strategies (`Sharded-2key`, `Sharded-N`, and `HdrHistogram` were added later).
-
-| Strategy | Clients | Throughput Mean (ops/sec) | Throughput CV | p99 Mean (us) |
-|---|---:|---:|---:|---:|
-| Disabled | 100 | 36,612 | 0.234 | 28,715 |
-| Disabled | 500 | 147,144 | 0.026 | 8,900 |
-| Disabled | 1000 | 47,091 | 0.739 | 226,997 |
-| GlobalMutex | 1000 | 32,038 | 0.061 | 260,195 |
-| Sharded | 1000 | 31,896 | 0.046 | 255,583 |
-| ThreadLocal | 500 | 148,950 | 0.008 | 8,587 |
-| ThreadLocal | 1000 | 28,568 | 0.079 | 269,401 |
-
-v12 (30 repetitions, fixed order, Apple M2) mean throughput CV across 48 configurations:
-**0.176**, max **0.698**. That dataset showed two throughput states that the fixed run
-order confounded with the strategies, so it cannot rank them; it is not used in the paper.
-
-- Full v5 report: [reports/final_experiment_v5.md](reports/final_experiment_v5.md)
-- Additional reports: [reports/final_experiment_report_enhanced.md](reports/final_experiment_report_enhanced.md), [reports/final_experiment_report.md](reports/final_experiment_report.md), [reports/final_experiment_details.md](reports/final_experiment_details.md)
-- v12 dataset: [experiment_results_v12](experiment_results_v12)
-- Canonical figures: [figures/canonical](figures/canonical)
-- Legacy raw benchmark trees (pre-v12): [results/final_experiment](results/final_experiment), [results/final_matrix](results/final_matrix), [results/macos_m2](results/macos_m2), [results/metrics_strategy_mandatory](results/metrics_strategy_mandatory), [results/system_validation_v15](results/system_validation_v15)
-- Legacy automation scripts (fixed-order runner, superseded): [benchmarks/run_final_matrix.sh](benchmarks/run_final_matrix.sh), [benchmarks/run_macos_m2_research.sh](benchmarks/run_macos_m2_research.sh), [benchmarks/run_paper_final_experiment.sh](benchmarks/run_paper_final_experiment.sh), [benchmarks/run_final_experiment_v12.py](benchmarks/run_final_experiment_v12.py)
 
 ## Architecture overview
 
