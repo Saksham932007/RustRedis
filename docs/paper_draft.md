@@ -6,7 +6,7 @@ independent `Standard_D8s_v6` runs pooled together (§4c: ten on
 separately-provisioned VMs plus the original single validation run, folded
 in as an eleventh replicate rather than left unused). Every table value,
 figure, and quoted statistic in §4-§7 regenerates from committed scripts
-(`benchmarks/paper_tables.py`, `generate_paper_figures.py`,
+(`scripts/paper_tables.py`, `generate_paper_figures.py`,
 `compute_mde.py`, `compute_mde_clustered.py`, `simulate_mde.py`,
 `combine_iterations.py`; see the Appendix); citations and page ranges have
 been checked. Known remaining work: (1) a live A/A run (§7); (2) author list
@@ -225,11 +225,11 @@ Abedi and Brecht (2017), as a fix for the class of problem §2 describes
 cloud microbenchmarking). This project's specific application:
 
 - Independent random permutation of the full (strategy x concurrency)
-  matrix per repetition (`benchmarks/run_rmit_experiment.py`).
+  matrix per repetition (`scripts/run_rmit_experiment.py`).
 - Server restarted before every run (unavoidable once order is no longer
   strategy-grouped — every run is potentially a strategy switch).
 - Machine-state snapshot logged immediately before every run
-  (`benchmarks/system_state.py`): CPU frequency, thermal-zone temperature,
+  (`scripts/system_state.py`): CPU frequency, thermal-zone temperature,
   memory/swap, load average, AC/battery status (fields degrade to `null`
   when unavailable, e.g. no thermal sensors or battery on a cloud VM).
 - Two hardware targets (both Azure, same VM family), chosen to check that
@@ -275,10 +275,10 @@ inspecting raw per-run output before trusting an aggregate.
 ## 4. Results on the RMIT Machines
 
 The Azure D4s_v6 dataset and its analysis are in the repo:
-`experiment_results_rmit_azure/`, with `raw_data_rmit.csv`,
+`experiments/azure_d4s_v6/`, with `raw_data_rmit.csv`,
 `rmit_analysis.json`, `rmit_analysis_summary.csv`, and `metadata_rmit.json`.
 
-**No two-state pattern.** `benchmarks/analyze_rmit_results.py`
+**No two-state pattern.** `scripts/analyze_rmit_results.py`
 flags a configuration as two-state when its throughput distribution
 splits into two clusters at least 1.8x apart with each holding >=15% of
 samples. Result: **0 of 48 configurations flagged.** The detector is a
@@ -298,7 +298,7 @@ time-varying condition affected block N, since every strategy in block N
 saw the same condition). For each (strategy, concurrency[, workload])
 cell, overhead is 1 − the *median* paired-block throughput ratio (medians
 are this project's primary point estimate throughout, per
-`benchmarks/analyze_rmit_results.py`); "mean overhead" in every table below
+`scripts/analyze_rmit_results.py`); "mean overhead" in every table below
 is the arithmetic mean of those per-cell medians across cells:
 
 | Strategy | Azure D4s_v6 mean overhead |
@@ -358,16 +358,16 @@ qualitatively changes:
 (overhead relative to `disabled`, averaged over the 3 workloads at each
 concurrency level, pooled across 11 independent runs.)
 
-![Instrumentation overhead vs. concurrency, five strategies, Azure D8s_v6](../figures/fig1_overhead_vs_concurrency.png)
+![Instrumentation overhead vs. concurrency, five strategies, Azure D8s_v6](figures/fig1_overhead_vs_concurrency.png)
 
 **Figure 1.** Mean overhead vs. `disabled` for each strategy across the full
 100-3000 concurrency range (Azure D8s_v6, 11 pooled runs, n=165 paired
 blocks per cell, averaged over the three workload types). Generated directly
-from `experiment_results_adv_pooled/rmit_analysis.json` by
-`benchmarks/generate_paper_figures.py` — the same source as the table
+from `experiments/azure_d8s_v6/pooled/rmit_analysis.json` by
+`scripts/generate_paper_figures.py` — the same source as the table
 above, not a separate hand-plotted figure. Compared to the single-run version
 of this figure (superseded as the paper's primary source, but pooled in as
-one of the eleven runs; see `experiment_results_rmit_advanced/` for
+one of the eleven runs; see `experiments/azure_d8s_v6/run_00/` for
 provenance), the line-to-line jaggedness is visibly reduced but not gone —
 consistent with §4c's finding that pooling tightens the paired-ratio
 resolution by roughly 3x, not to zero, while a differently-computed
@@ -409,7 +409,7 @@ write-path lock contention, a write-heavy workload might expose it more),
 and for `thread_local`, `sharded_2key`, and `sharded_n` it does not.
 
 **The "crossovers" the analysis script flags are noise, not signal — and
-with enough data, it stops flagging any.** `benchmarks/analyze_rmit_results.py`'s
+with enough data, it stops flagging any.** `scripts/analyze_rmit_results.py`'s
 crossover detector (which strategy has the highest median throughput at
 each concurrency level) reports **0** leader changes across the 3 workloads
 with the 11-run pooled data, down from 4 with 10 runs pooled and 6 in the
@@ -437,14 +437,14 @@ gives:
 | 4 | hdr_histogram | hdr_histogram | not resolved (same test as rank 3) |
 | 5 (most expensive) | sharded_n | sharded_n | resolved (10/11 runs, p≈0.012) |
 
-![Mean overhead by strategy, grouped by dataset](../figures/fig2_cross_dataset_ranking.png)
+![Mean overhead by strategy, grouped by dataset](figures/fig2_cross_dataset_ranking.png)
 
 **Figure 2.** The same ranking as a chart: both VM configurations agree on
 strategy order, though (per the table above and §4c) only ranks 1, 2, and 5
 are resolved at conventional significance — ranks 3 and 4 agree in point
 estimate but not at a level distinguishable from chance, and less so than
 an earlier, smaller pool of 10 runs suggested. Generated by
-`benchmarks/generate_paper_figures.py` from each dataset's own
+`scripts/generate_paper_figures.py` from each dataset's own
 `rmit_analysis.json`, using the same per-cell ratio-median statistic as
 every table in §4 and §4b (verified to reproduce those tables' values
 exactly before this script was trusted for the figure).
@@ -492,7 +492,7 @@ as a permanent limitation, we reran the identical design independently ten
 more times, across four separately-provisioned D8s_v6 VMs in three Azure
 regions (Central India x2, South India, West US 3; §3) — eleven runs of
 2,160 each, 23,760 runs pooled in total, counting the original run.
-`benchmarks/combine_iterations.py` pools all eleven into one dataset: each
+`scripts/combine_iterations.py` pools all eleven into one dataset: each
 run's `block_id` (1-15) is offset by its run index before concatenation, so
 the paired within-block comparison (§2) still only ever pairs a strategy
 against `disabled` within the single run that block actually came from —
@@ -514,7 +514,7 @@ that surveying 165 people from 11 households and treating it as 165
 independent opinions overstates what you know about the wider population.
 
 **A cluster-aware check.** For every (strategy, concurrency, workload)
-cell, `benchmarks/compute_mde_clustered.py` first collapses each run's 15
+cell, `scripts/compute_mde_clustered.py` first collapses each run's 15
 blocks to that run's own median ratio — one number per run per cell, 11
 numbers per cell — then computes the detectable-effect floor from the
 between-run spread of those 11 numbers, using n=11 (the true number of
@@ -532,7 +532,7 @@ bound to within its simulation grid resolution and confirming the naive
 0.58% figure is a genuine but modest overstatement of precision, not a
 qualitatively wrong one.
 
-![CI half-width, one run vs. 11 pooled runs, Azure D8s_v6](../figures/fig3_ci_tightening.png)
+![CI half-width, one run vs. 11 pooled runs, Azure D8s_v6](figures/fig3_ci_tightening.png)
 
 **Figure 3.** Mean relative 95% bootstrap CI half-width on raw throughput,
 per strategy, comparing one D8s_v6 run (n=15/cell) against the 11-run pool
@@ -578,7 +578,7 @@ pooled-sample result at face value.
 ## 5. Machine-State Logging and What It Can Check
 
 Every row of each `raw_data_rmit.csv` carries a machine-state snapshot taken
-immediately before the run (`benchmarks/system_state.py`): mean and maximum
+immediately before the run (`scripts/system_state.py`): mean and maximum
 CPU frequency, governor, thermal-zone temperature, memory and swap
 availability, 1/5/15-minute load average, and AC/battery status (fields are
 `null` where the hardware lacks them, e.g. thermal sensors and batteries on
@@ -588,7 +588,7 @@ medians 8.5 on D4s_v6 and 14.1 on D8s_v6, pooled across all eleven runs,
 range 3.4-38.3), but there they largely reflect the benchmark's own hundreds
 to thousands of client threads rather than outside interference.
 
-The two-state check in `benchmarks/analyze_rmit_results.py` is a deliberately
+The two-state check in `scripts/analyze_rmit_results.py` is a deliberately
 simple heuristic: split each configuration's throughputs at their largest gap
 and flag it if the two clusters' medians are at least 1.8x apart and each
 holds at least 15% of the samples. It flagged 0 of 192 configurations (0 of
@@ -600,7 +600,7 @@ state. Because it is a largest-gap heuristic rather than a mixture-model fit,
 it could still miss subtler multimodality or state shifts smaller than 1.8x;
 the paired within-block design does not depend on it, since it compares
 strategies within blocks whatever the machine state was.
-`benchmarks/hardware_hypothesis_check.sh` exists to test thermal-throttling,
+`scripts/hardware_hypothesis_check.sh` exists to test thermal-throttling,
 governor-instability, and memory-pressure hypotheses directly if a
 machine-state explanation for any future anomaly is needed.
 
@@ -726,7 +726,7 @@ per-sample output by eye before trusting an aggregate.
   difference" claims carry an explicit floor rather than an implicit one.
   (a) A closed-form paired-design estimate, `MDE ≈ (z_.975 + z_.80) × SD /
   sqrt(n)` (80% power, 95% confidence), from the pooled SD of per-block
-  strategy/`disabled` throughput ratios (`benchmarks/compute_mde.py`):
+  strategy/`disabled` throughput ratios (`scripts/compute_mde.py`):
   **0.9% on Azure D4s_v6** (SD 0.017, n=30 reps/cell), **2.1% on a single
   Azure D8s_v6 run** (SD 0.029, n=15), and **0.58% on the 11-run D8s_v6 pool**
   treating all 165 paired blocks as independent (SD 0.026, n=165) — this
@@ -734,13 +734,13 @@ per-sample output by eye before trusting an aggregate.
   adapted from Laaber et al. (2019): for each cell, remove its own effect,
   inject an overhead x, resample n paired ratios, and test whether the 95%
   percentile-bootstrap CI of the median (the interval
-  `analyze_rmit_results.py` reports) excludes 1 (`benchmarks/simulate_mde.py`;
+  `analyze_rmit_results.py` reports) excludes 1 (`scripts/simulate_mde.py`;
   400 simulations x 400 bootstrap resamples per cell and x, seed 0). At
   x = 0 the test rejects in 5%-6% of simulations (nominal 5%). Pooled power
   reaches 80% at about **1.0%-1.5%** on Azure D4s_v6, **2.0%** on a single
   D8s_v6 run, and **0.75%** on the 11-run pool. (c) Because the pooled
   n=165 is really 11 independent runs of 15 correlated within-run blocks
-  each, `benchmarks/compute_mde_clustered.py` collapses each run's 15
+  each, `scripts/compute_mde_clustered.py` collapses each run's 15
   blocks to one median per cell and computes the MDE from the between-run
   spread of those 11 numbers (n=11, not 165): **0.69%** — close to (b)'s
   simulated figure and about 19% more conservative than (a)'s naive pooled
@@ -898,47 +898,47 @@ reference-manager step.
 
 ```bash
 # Dedicated cloud VM (Azure Standard_D4s_v6), single workload (see docs/rmit_experiment_protocol.md for full az CLI steps)
-RMIT_ENVIRONMENT_LABEL=<label> python3 benchmarks/run_rmit_experiment.py \
+RMIT_ENVIRONMENT_LABEL=<label> python3 scripts/run_rmit_experiment.py \
   --runs 30 --concurrency 100,200,300,400,500,600,700,1000 \
-  --output-dir experiment_results_rmit_azure
-python3 benchmarks/analyze_rmit_results.py --input experiment_results_rmit_azure/raw_data_rmit.csv
+  --output-dir experiments/azure_d4s_v6
+python3 scripts/analyze_rmit_results.py --input experiments/azure_d4s_v6/raw_data_rmit.csv
 
 # Dedicated cloud VM (Azure Standard_D8s_v6), advanced design: 3 workloads x wider concurrency range.
-# This design was first run once (experiment_results_rmit_advanced/, kept
+# This design was first run once (experiments/azure_d8s_v6/run_00/, kept
 # in the repo - it is the run that caught the file-descriptor pitfall in
 # §3) then repeated independently 10 more times on separately-provisioned
 # VMs (ideally across more than one Azure region) with a distinct --seed
-# each time, into experiment_results_adv_iter_01 .. _10, to reproduce the
+# each time, into experiments/azure_d8s_v6/run_01 .. run_10, to reproduce the
 # 11-run pooled §4b/§4c dataset:
 for i in $(seq -w 1 10); do
-  RMIT_ENVIRONMENT_LABEL=<label-$i> python3 benchmarks/run_rmit_experiment.py \
+  RMIT_ENVIRONMENT_LABEL=<label-$i> python3 scripts/run_rmit_experiment.py \
     --runs 15 --concurrency 100,250,500,750,1000,1500,2000,3000 \
     --workloads mixed,read-heavy,write-heavy --seed $((1000 + 10#$i)) \
-    --output-dir experiment_results_adv_iter_$i
+    --output-dir experiments/azure_d8s_v6/run_$(printf %02d $i)
 done
 
 # Pool all 11 independent runs into one dataset - the 10 above plus the
-# original experiment_results_rmit_advanced/ run - offsetting each run's
+# original experiments/azure_d8s_v6/run_00/ run - offsetting each run's
 # block_id so paired-block comparisons never mix runs from different VMs (§4c)
-python3 benchmarks/combine_iterations.py
-python3 benchmarks/analyze_rmit_results.py --input experiment_results_adv_pooled/raw_data_rmit.csv
+python3 scripts/combine_iterations.py
+python3 scripts/analyze_rmit_results.py --input experiments/azure_d8s_v6/pooled/raw_data_rmit.csv
 
 # Every table value and quoted statistic in §4-§4c (prints them all), from the
 # rmit_analysis.json files above (D4s_v6, the single-run D8s_v6, and the pooled D8s_v6)
-python3 benchmarks/paper_tables.py
+python3 scripts/paper_tables.py
 
 # Figures 1-3, generated from the same files
-python3 benchmarks/generate_paper_figures.py
+python3 scripts/generate_paper_figures.py
 
 # Minimum detectable effect numbers (§7, §4c)
-python3 benchmarks/compute_mde.py            # closed-form estimate, all three datasets
-python3 benchmarks/simulate_mde.py           # injected-effect simulation (needs numpy; ~15 minutes with the pooled dataset)
-python3 benchmarks/compute_mde_clustered.py  # cluster-aware bound for the pooled dataset only (§4c)
+python3 scripts/compute_mde.py            # closed-form estimate, all three datasets
+python3 scripts/simulate_mde.py           # injected-effect simulation (needs numpy; ~15 minutes with the pooled dataset)
+python3 scripts/compute_mde_clustered.py  # cluster-aware bound for the pooled dataset only (§4c)
 ```
 
 The paper's §4b/§4c numbers use the 11-run pool
-(`experiment_results_adv_pooled/`), which includes
-`experiment_results_rmit_advanced/` as one of its eleven constituent runs
+(`experiments/azure_d8s_v6/pooled/`), which includes
+`experiments/azure_d8s_v6/run_00/` as one of its eleven constituent runs
 (`combine_iterations.py` reads it directly); that single-run dataset also
 remains in the repository on its own for provenance, since it is the run
 that first validated this design and caught the file-descriptor pitfall in

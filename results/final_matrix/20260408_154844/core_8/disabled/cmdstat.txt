@@ -1,3 +1,0 @@
-# CommandStats (strategy: disabled)
-(no commands recorded)
-

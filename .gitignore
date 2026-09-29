@@ -2,18 +2,13 @@
 .DS_Store
 __pycache__/
 *.pyc
+.claude/
 
-# Runtime persistence artifacts from local server runs — never intended
-# to be versioned (one accidentally made it in via Git LFS as a 243MB
-# blob; see repo cleanup history if you need the story).
+# Runtime persistence artifacts from local server runs
 *.aof
 appendonly.aof*
 
-# RMIT experiment raw per-run artifacts: keep raw_data_rmit.csv,
-# rmit_analysis.json/csv, and metadata_rmit.json, but don't commit the
-# thousands of per-run server logs / benchmark JSON under run_data/.
-experiment_results_rmit*/run_data/
-experiment_results_adv_iter_*/run_data/
-experiment_results_adv_pooled/run_data/
+# Raw per-run server logs / benchmark JSON; only aggregated CSV/JSON are versioned
+experiments/**/run_data/
+experiments/output/
 hardware_diag.csv
-/tmp/hardware_diag_bench_out/

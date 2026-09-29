@@ -1,15 +1,7 @@
 # Docs Index
 
-This directory contains current design/operations docs and a consolidated archive for legacy material.
-
-## Current Docs
-
-- [system-design.md](system-design.md)
-- [failure-analysis.md](failure-analysis.md)
-- [macos_m2_experiment_protocol.md](macos_m2_experiment_protocol.md)
-
-## Legacy Archive
-
-- [legacy_docs_archive.md](legacy_docs_archive.md)
-
-Legacy docs were consolidated to reduce duplication and keep repository structure clean.
+- [paper_draft.md](paper_draft.md): full write-up (methodology, results, statistics)
+- [rmit_experiment_protocol.md](rmit_experiment_protocol.md): how the experiments are run
+- [system-design.md](system-design.md): server architecture
+- [failure-analysis.md](failure-analysis.md): failure modes
+- [related_work_notes.md](related_work_notes.md): related-work notes
