@@ -1,0 +1,25 @@
+pooled D8s_v6 complete blocks: 180   (11 runs x 15 blocks x 8 concurrency x 3 workloads = 3960)
+single D4s_v6 complete blocks: 240   (1 run x 30 blocks x 8 concurrency x 1 workload = 240)
+
+==============================================================================
+FOLLOW-UP  Splitting the confounded axes
+==============================================================================
+axis         contrast                                             pp               95% CI
+ALLOC        sharded_bucketed_c1 - sharded_2key                1.151  [  0.689,  1.613]
+PAYLOAD*     hdr_histogram - thread_local_owned                0.654  [  0.164,  1.143]
+ALLOC(tls)   thread_local_owned - thread_local                 0.261  [ -0.098,  0.619]
+
+  Cardinality curve — each row is `sharded_bucketed_c1` held fixed as the reference,
+  so every difference is entry count alone:
+
+config                      requested C  achieved entries  cost vs disabled           vs C=1
+sharded_bucketed_c1                   1                 4        1.842 %        (reference)
+sharded_bucketed_c10                 10                22        1.891 %          +0.049 pp
+sharded_bucketed_c100               100               202        1.933 %          +0.091 pp
+sharded_bucketed_c1000             1000              2002        2.086 %          +0.244 pp
+sharded_bucketed_c10000           10000             13042        2.328 %          +0.486 pp
+
+  achieved entries includes +2 control-plane entries (PING, CMDSTAT);
+  data-plane entries are that value minus 2.
+
+wrote experiments/followup_axes_analysis.json

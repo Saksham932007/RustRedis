@@ -1,0 +1,11 @@
+{
+  "description": "Pooled dataset: 4 independent RMIT runs from experiments/azure_d8s_v6_followup. block_id offset by run_index*100 so paired-block comparisons stay scoped to the single run they came from.",
+  "n_iterations": 4,
+  "rows_per_iteration": {
+    "run_01": 540,
+    "run_02": 540,
+    "run_03": 540,
+    "run_04": 540
+  },
+  "total_rows": 2160
+}

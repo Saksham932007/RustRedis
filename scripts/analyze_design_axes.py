@@ -74,7 +74,24 @@ CONTRASTS = {
 
 # "cost" is always oriented so that higher = worse.
 METRICS = ["throughput", "avg_latency", "p50", "p99"]
-T_CRIT_10 = 2.228  # two-sided 97.5th percentile of t with 10 df (11 runs)
+#: Two-sided 97.5th percentile of Student's t by degrees of freedom. The cluster
+#: unit is the independent run, so df = n_runs - 1 and the correct critical value
+#: depends on how many runs the dataset actually holds (11 for the main batch,
+#: 4 for the follow-up). Falls back to the normal quantile for large df.
+T_CRIT_BY_DF = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
+    8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145,
+    15: 2.131, 16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086,
+}
+
+
+def t_crit(df: int) -> float:
+    if df <= 0:
+        return float("nan")
+    return T_CRIT_BY_DF.get(df, 1.960)
+
+
+T_CRIT_10 = t_crit(10)  # retained for the main-batch call sites
 
 
 # --------------------------------------------------------------------------- #
@@ -144,7 +161,8 @@ def cluster_ci(run_means: np.ndarray) -> Tuple[float, float, float]:
         return m, float("nan"), float("nan")
     se = float(run_means.std(ddof=1)) / math.sqrt(n)
     m = float(run_means.mean())
-    return m, m - T_CRIT_10 * se, m + T_CRIT_10 * se
+    tc = t_crit(n - 1)
+    return m, m - tc * se, m + tc * se
 
 
 def block_bootstrap_ci(blocks: Dict[tuple, dict], fn: Callable[[dict], float],
@@ -494,9 +512,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--json-out", default=str(REPO / "experiments" / "design_axes_analysis.json"))
+    ap.add_argument("--pooled-csv", default=str(POOLED),
+                    help="Pooled dataset to analyse (default: the 11-run main batch). "
+                         "Point at the follow-up pool to price the split axes.")
+    ap.add_argument("--followup-only", action="store_true",
+                    help="Skip the main-paper sections; print only the axis split "
+                         "and cardinality curve (for the follow-up dataset, which "
+                         "does not contain the full main-paper design).")
     args = ap.parse_args()
 
-    pooled = load_blocks(POOLED)
+    pooled = load_blocks(Path(args.pooled_csv))
     d4s = load_blocks(D4S)
     print(f"pooled D8s_v6 complete blocks: {len(pooled)}"
           f"   (11 runs x 15 blocks x 8 concurrency x 3 workloads = {11 * 15 * 8 * 3})")
@@ -504,6 +529,11 @@ def main() -> None:
           f"   (1 run x 30 blocks x 8 concurrency x 1 workload = {30 * 8})")
 
     out: Dict[str, object] = {"n_blocks_pooled": len(pooled), "n_blocks_d4s": len(d4s)}
+    if args.followup_only:
+        section_followup(pooled, out)
+        Path(args.json_out).write_text(json.dumps(out, indent=1))
+        print(f"\nwrote {args.json_out}")
+        return
     section_overheads(pooled, d4s, out)
     section_axes(pooled, d4s, out)
     section_headline(pooled, d4s, out)
