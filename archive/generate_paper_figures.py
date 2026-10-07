@@ -27,7 +27,7 @@ from statistics import mean
 import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parent.parent
-FIG_DIR = ROOT / "docs" / "figures"
+FIG_DIR = ROOT / "archive" / "figures"
 FIG_DIR.mkdir(exist_ok=True)
 
 # Fixed categorical order/colors (validated colorblind-safe palette, slots 1-5).

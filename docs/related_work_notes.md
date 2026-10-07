@@ -1,6 +1,6 @@
 # Annotated related-work notes
 
-Moved out of `docs/paper_draft.md` §1 (which is now a condensed related-work
+Moved out of `archive/paper_draft.md` §1 (which is a condensed related-work
 section). Retained as working notes; some early annotations below predate the
 full read of Laaber et al. (2019) and the concept-note cross-check — where they
 conflict with the paper, the paper is authoritative.

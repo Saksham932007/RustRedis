@@ -1,14 +1,16 @@
 # Cardinality Before Contention: A Factorial Decomposition of Per-Command Observability Overhead in a Concurrent In-Memory Key-Value Store
 
 **Saksham Kapoor**
-Delhi, India
+Independent Researcher, Delhi, India
 `sakshamkapoor810@gmail.com`
+ORCID: `0000-0000-0000-0000` *(placeholder — register at orcid.org and replace
+before submission; see `submission/SUBMISSION_CHECKLIST.md`)*
 
-*Manuscript prepared for a performance-engineering venue (e.g. ACM/SPEC ICPE,
-Empirical Software Engineering, or Performance Evaluation). Reference style,
-section numbering, and length are to be converted to the target venue's
-template at submission; the content below is venue-neutral. Every table,
-figure, and quoted statistic regenerates from committed artifacts via
+*Prepared for submission to Software: Practice and Experience (Wiley), with
+Journal of Systems and Software as the backup venue. Reference style and
+section numbering are to be converted to the target journal's template at
+submission; the content below is venue-neutral. Every table, figure, and quoted
+statistic regenerates from committed artifacts via
 `scripts/analyze_design_axes.py` and `scripts/generate_design_axes_figures.py`
 (Appendix A).*
 
@@ -16,65 +18,35 @@ figure, and quoted statistic regenerates from committed artifacts via
 
 ## Abstract
 
-Engineering folklore treats the cost of per-operation telemetry as a
-synchronization problem: the advice is to replace the global counter lock with
-a sharded or lock-free structure. We show that on a network-bound, thread-pool
-concurrent server this advice optimizes the smaller of two costs. We instrument
-a Rust Redis-compatible in-memory key-value store with six interchangeable
+Practitioner guidance treats per-operation telemetry cost as a synchronization
+problem: replace the global counter lock with a sharded or lock-free structure.
+On a thread-pool concurrent server this optimizes the smaller of two costs. We
+instrument a Rust Redis-compatible in-memory key-value store with six
 per-command metrics collectors chosen so that adjacent pairs differ along
 exactly one design axis — synchronization discipline, metric key cardinality,
-aggregation locality, and per-sample payload — turning a strategy comparison
-into a factorial decomposition. Measurements use Randomized Multiple
-Interleaved Trials, repeated as eleven independent runs across five separately
-provisioned Azure `Standard_D8s_v6` VMs in three regions, plus one
-`Standard_D4s_v6` VM (25,200 benchmark runs; 100–3000 concurrent clients; three
-read/write mixes), with all confidence intervals clustered on the independent
-runs rather than on the correlated blocks they contain. A second, dedicated
-eight-VM experiment (4,320 further runs) separates the two axes that the main
-design bundles, for 29,520 benchmark runs in all.
+aggregation locality, per-sample payload — turning a strategy comparison into a
+factorial decomposition, priced by Randomized Multiple Interleaved Trials on
+fourteen separately provisioned Azure VMs.
 
-Four results follow. **(1)** Moving the metric key from a 2-entry command-name
-label to a ~10,000-entry data-key label costs 0.87 pp of throughput, 1.66×
-more than the 0.52 pp that replacing a global mutex with a 64-way sharded
-concurrent map saves (difference 0.34 pp, 95% CI [0.19, 0.50], 10/11 runs,
-sign p = 0.012). The practical consequence is an inversion of the folklore: the
-sharded "scalable" map at high cardinality is *measurably slower* than the
-single global lock at low cardinality. **(2)** The axes obey different scaling
-laws. Over a 30× increase in client concurrency no axis shows a trend
-distinguishable from zero (largest slope 0.041 pp per doubling, CI spanning
-zero), even though the server is genuinely saturated (p99 rises from 0.76 ms to
-78.9 ms). The synchronization axis instead tracks *worker-thread* count,
-growing 2.6× from 4 to 8 workers while the cardinality and payload axes move
-−8% and −6%. Client load, the knob benchmarks usually turn, is the wrong one
-for exposing telemetry contention. **(3)** Overhead is not one number: it has a
-*rigidity* that depends on the axis. Counter-based costs are elastic — absorbed
-by queueing slack, retaining only 38–58% of their median cost at p99 — whereas
-the histogram payload cost is rigid, statistically identical across throughput,
-mean, p50, and p99 (0.89–0.94 pp). This produces a rank inversion invisible to
-throughput-only evaluation: HdrHistogram versus GlobalMutex is unresolved on
-throughput (p = 0.23) yet resolves decisively in *opposite directions* at p50
-(cheaper, p = 0.001) and p99 (costlier, p = 0.001). **(4)** A purpose-built
-instrument — a collector whose per-operation work is identical at every
-cardinality, so that sweeping it varies only the number of live map entries —
-confirms that the cardinality axis is genuinely cardinality rather than the
-per-operation key allocation bundled with it (entry count accounts for
-essentially all of it; the histogram likewise accounts for ~80% of the payload
-axis). The same experiment bounds the claim: the effect is indistinguishable
-from zero below roughly 10³ entries, and cardinality *alone* does not
-statistically outrank the synchronization axis, so we make the package claim
-in (1) and not the stronger one.
+Moving the metric key from a 2-entry command-name label to
+a 10,000-entry data-key label costs 1.66× what replacing a global mutex with a
+64-way sharded map saves, inverting the advice: the sharded map at high
+cardinality is slower than the global lock at low cardinality. The axes obey
+different scaling laws: none responds to a 30× rise in client concurrency on a
+saturated server, while the synchronization axis tracks worker-thread count
+instead, so client load is the wrong experimental knob. Overhead has an
+axis-dependent rigidity: counter costs dissipate into queueing slack at the
+tail, whereas histogram-payload cost arrives undiminished at p99, producing a
+percentile-dependent rank inversion that throughput-only evaluation reports as
+a confident null. A collector whose per-operation work is identical at every
+cardinality then confirms the effect is live entry count, not key allocation,
+and bounds it: below ~1,000 entries it is indistinguishable from zero.
 
-We argue that observability overhead should be budgeted per design axis and per
-target percentile, not as a single headline percentage, and we give the
-measurement design needed to do so.
+Observability overhead should therefore be budgeted per design axis and per
+target percentile, not as one headline percentage.
 
-**Keywords:** performance measurement, observability, instrumentation overhead,
-metric cardinality, tail latency, concurrency, key-value stores, randomized
-interleaved trials, cloud benchmarking
-
-**CCS Concepts:** • *General and reference* → *Measurement; Performance*;
-• *Software and its engineering* → *Software performance*;
-• *Information systems* → *Key-value stores*.
+**Keywords:** instrumentation overhead; metric cardinality; performance
+measurement; tail latency; key-value stores; cloud benchmarking
 
 ---
 
@@ -83,14 +55,19 @@ interleaved trials, cloud benchmarking
 Every production server carries telemetry, and every telemetry design makes a
 choice about how counters are stored and updated on the request path. The
 received wisdom about that choice is remarkably uniform. Practitioner guidance
-converges on "keep the hot path lock-free": hold a per-metric atomic handle,
-shard the counter map, or accumulate per-thread and merge later. The
-implicit model is that instrumentation overhead is *contention* overhead, and
-that contention grows with load.
+converges on "keep the hot path lock-free" [5, 6, 8, 17]: hold a per-metric
+atomic handle, shard the counter map, or accumulate per-thread and merge later.
+The Prometheus Go client, for instance, deliberately removed the mutex from its
+histogram observation path on the grounds that mutexes are "very slow in
+highly-concurrent scenarios" [5]; the standard operational and
+systems-performance references give the same advice [8, 17], as does the
+reference text on Rust concurrency [6]. The implicit model is that instrumentation overhead is
+*contention* overhead, and that contention grows with load.
 
 This paper tests that model and finds it misleading in two separate ways on a
-class of system where it is routinely applied: a single-process, network-bound,
-thread-pool concurrent in-memory key-value store.
+class of system where it is routinely applied: a single-process, thread-pool
+concurrent in-memory key-value server, driven over TCP by a co-located
+loopback client (§4.2).
 
 The difficulty in testing it is that "which metrics strategy is fastest" is the
 wrong question, because a strategy is a bundle of decisions. A thread-local
@@ -142,7 +119,9 @@ percentiles and makes throughput-only evaluation actively misleading (§5.3).
 2. **The cardinality-dominance result** (§5.1): high-cardinality dynamic
    labeling costs 1.66× what the entire global-lock-to-sharded-map transition
    saves, inverting the usual optimization priority, and reproducing on both VM
-   sizes (4.5× at 4 workers, 1.66× at 8). A dedicated eight-VM experiment
+   sizes (4.5× on the 4-worker VM, 1.66× on the 8-worker one; 4.51× and 1.58×
+   when the two are matched on workload and client load, §5.2). A dedicated
+   eight-VM experiment
    (§5.4) shows the effect is cardinality itself and not the key allocation
    bundled with it, and bounds where it applies: below ~10³ entries it is
    indistinguishable from zero.
@@ -168,54 +147,80 @@ percentiles and makes throughput-only evaluation actively misleading (§5.3).
 ## 2. Background and Related Work
 
 **Instrumentation overhead.** That measurement perturbs what it measures is
-long established; Tallent et al. [18] show it specifically for lock-contention
-tooling, and production tracing systems bound their own cost by sampling
-precisely because it is not negligible [17]. Recent empirical work prices
-whole instrumentation *frameworks*: studies of OpenTelemetry and comparable
-agents report CPU overheads in the tens of percent and throughput losses up to
-roughly 8% in aggregate. These studies answer "what does turning on this
-framework cost?" They do not decompose that cost into the design decisions
-that produced it, which is the gap this paper addresses.
+long established; Tallent et al. [41] show it specifically for lock-contention
+tooling, dynamic binary instrumentation costs a large multiple of native
+execution time [25], and production tracing systems bound their own cost by
+sampling precisely because it is not negligible [19, 40]. Recent empirical work
+prices whole instrumentation *frameworks*. Nõu et al. [31] measure
+OpenTelemetry and Elastic APM on microservice and serverless workloads and
+report throughput reductions of 19–80% and latency increases up to 175%,
+attributing the largest single share to serializing trace data for export.
+Reichelt et al. [36] extend the MooBench monitoring benchmark to OpenTelemetry
+and compare it against inspectIT and Kieker [45]; a later study by the same
+group isolates the instrumentation *technology* rather than the framework and
+finds spreads of up to 30% between technologies monitoring the same code [37].
+These studies answer "what does turning on this framework cost?" They do not
+decompose that cost into the design decisions that produced it, which is the
+gap this paper addresses.
 
 **Metric cardinality.** Cardinality is one of the most discussed operational
 problems in modern monitoring, but essentially always as a *storage-side*
 concern: each distinct label combination creates a time series with memory,
-disk, index, and billing cost. The remedy offered is bounded-cardinality
-labels, for backend reasons. The *producer-side* request-path cost of a
-high-cardinality label — the extra work the server itself does per operation —
-is, to our knowledge, not measured in a controlled setting, and never compared
-against the synchronization cost it is traded against in practice.
+disk, index, and billing cost. The design of large-scale metric systems is
+organized around that fact. Gorilla [34] and Monarch [3] both describe
+in-memory time-series stores whose capacity is denominated in *active series*,
+and a survey of observability data management identifies series count as the
+scaling bottleneck for the class as a whole [21]. The remedy offered is
+accordingly bounded-cardinality labels, and the reasons given are backend
+reasons: the Prometheus project instructs users not to put high-cardinality
+dimensions such as user IDs or email addresses into labels because each
+distinct combination creates another time series [35]; operational handbooks
+repeat the advice with the same justification [8]; and the OpenTelemetry
+specification goes as far as defining aggregation cardinality limits in the SDK
+so that a misbehaving producer cannot overwhelm a backend [32]. The
+*producer-side* request-path cost of a high-cardinality label — the extra work
+the server itself does per operation — is, to our knowledge, not measured in a
+controlled setting, and never compared against the synchronization cost it is
+traded against in practice.
 
 **Concurrent counting.** The structures we compare descend from a long line of
-work on reducing counter contention: counting networks [3], the per-core
-"sloppy counters" that removed kernel counter bottlenecks in Linux [4], and
-the general replacement of coarse locks with concurrency-friendly structures
-that lifted Memcached throughput in MemC3 [9]. David et al. [8] establish that
-synchronization cost is strongly hardware-dependent, which is the premise
-behind our worker-count comparison in §5.2. This literature is the source of
-the folklore we test: it is correct that sharded and per-thread counting
-reduce contention, and our SYNC axis confirms it. The finding here is about
-*relative magnitude* — that the contention saved is smaller than the
-cardinality cost typically incurred alongside it.
+work on reducing counter contention: counting networks [4], scalable lock
+algorithms that bound remote memory references per acquisition [27], the
+per-core "sloppy counters" that removed kernel counter bottlenecks in Linux
+[7], and the general replacement of coarse locks with concurrency-friendly
+structures that lifted key-value throughput in MemC3 [14] and MICA [24] and
+that underpins production Memcached deployments [30]. David et al. [12]
+establish that synchronization cost is strongly hardware-dependent, which is
+the premise behind our worker-count comparison in §5.2. The concrete structures
+under test here are a Rust standard-library mutex over a `HashMap`, the sharded
+concurrent map `DashMap` [46], and thread-local accumulation on the Tokio
+asynchronous runtime [43]. This literature is the source of the guidance we
+test: it is correct that sharded and per-thread counting reduce contention, and
+our SYNC axis confirms it. The finding here is about *relative magnitude* —
+that the contention saved is smaller than the cardinality cost typically
+incurred alongside it.
 
 **Benchmarking methodology.** Measured performance depends on setup details
-experimenters rarely control [15], so rigorous practice reports intervals over
-repeated runs [11, 12] and randomizes factors that should not matter [7].
-Cloud environments add time-varying noise in compute [14] and network [20].
+experimenters rarely control [29], so rigorous practice reports intervals over
+repeated runs [16, 20] and randomizes factors that should not matter [11];
+Papadopoulos et al. [33] consolidate these into methodological principles
+specifically for cloud experiments. Cloud environments add time-varying noise
+in compute [26] and network [44], and that variability is itself patterned and
+partly predictable across providers and instance types [23].
 Randomized Multiple Interleaved Trials (RMIT) was introduced by Abedi, Heard
 and Brecht [2] and shown necessary in clouds by Abedi and Brecht [1], who found
 differences up to 37.8% between two *identical* systems under non-randomized
-designs. Duet benchmarking [5] instead runs artifacts simultaneously, which
+designs. Duet benchmarking [9] instead runs artifacts simultaneously, which
 does not suit a saturating client-server benchmark where two server instances
-would contend. Laaber et al. [13] combine RMIT-style sampling, bootstrap
+would contend. Laaber et al. [22] combine RMIT-style sampling, bootstrap
 intervals, A/A tests, and injected-slowdown detectability analysis for cloud
 microbenchmarks, and explicitly disclaim load and stress tests. We adopt RMIT
 and their inferential posture; the technique is theirs, not ours. Our
 methodological addition is narrower and specific to pooled replicates:
 inference clustered on independent VM runs rather than on the correlated blocks
-within them (§4.3). For key-value systems YCSB [6] is the standard suite and
-Reniers et al. [16] survey under-reporting in NoSQL benchmarking; Fruth et
-al. [10] show harnesses themselves distorting measured tail latency, which is
+within them (§4.3). For key-value systems YCSB [10] is the standard suite and
+Reniers et al. [38] survey under-reporting in NoSQL benchmarking; Fruth et
+al. [15] show harnesses themselves distorting measured tail latency, which is
 part of why §5.3 reports tail results as *relative* paired ratios against a
 baseline measured by the same harness.
 
@@ -260,6 +265,13 @@ differ along one axis:
 | `sharded_n` | `DashMap`, 64 shards | ~10,000 | eager, shared | counter |
 | `thread_local` | thread-local map + periodic flush | 2 | deferred, private | counter |
 | `hdr_histogram` | thread-local map + periodic flush | 2 | deferred, private | counter + HDR histogram |
+
+The `hdr_histogram` collector records each command's execution duration into an
+HdrHistogram [42] — a fixed-precision, logarithmically bucketed histogram
+designed to record latency at a bounded and roughly constant per-sample cost —
+using the Rust port of the reference implementation [18]. Every other collector
+stores only a count and a running duration sum per key, so this collector is
+the paper's per-sample *payload* treatment.
 
 Cardinality 2 means the metric is keyed by command name (`GET`, `SET`);
 cardinality ~10,000 means it is keyed by the request's data key, over a
@@ -358,6 +370,20 @@ homogeneous in microarchitecture and varies only in instance, region, and date. 
 each run's `block_id` so paired comparisons never mix blocks from different
 VMs.
 
+**Client placement: loopback and co-located.** The load generator runs on the
+same VM as the server and connects over the loopback interface. There is
+therefore no physical network between client and server, and the client
+competes with the server for the same 8 (or 4) vCPUs. We describe the setup as a
+*loopback, co-located client* rather than as a network-bound measurement, and
+two consequences follow. First, every overhead figure in §5 is a paired
+within-block ratio against a `disabled` baseline measured by the same
+co-located client under the same conditions, so the client's own CPU
+consumption is common to numerator and denominator and cancels — which is why
+the design tolerates co-location at all. Second, the vCPU count bounds client
+and server threads *jointly*, so the 4-versus-8-worker comparison changes the
+client's CPU budget along with the server's worker pool. That bears directly on
+§5.2's worker-count result and is taken up there.
+
 ### 4.3 Inference
 
 For the pooled dataset the 165 blocks per cell are **11 independent runs × 15
@@ -453,7 +479,10 @@ exceeds the synchronization axis:
 - CARD − SYNC = **0.34 pp**, 95% CI **[0.19, 0.50]** (excludes zero)
 - CARD > SYNC in **10 of 11** independent runs, exact sign test **p = 0.012**,
   paired *t*(10) = 4.99
-- On D4s_v6 the same comparison gives **4.5×** (0.79 vs 0.18 pp)
+- On D4s_v6 the same comparison gives **4.5×** (0.79 vs 0.18 pp). That dataset
+  is mixed-workload and ≤ 1000 clients throughout, so it is not directly
+  comparable to the 1.66× above, which pools eight concurrency levels and three
+  workloads; §5.2 compares the two worker counts on a matched slice instead
 
 Because both axes are differences against `sharded_2key`, their gap *is* the
 direct strategy comparison:
@@ -526,13 +555,32 @@ histogram) scale with neither — they are constants per request.
 
 Two consequences follow. **Methodologically**, the conventional way to expose
 telemetry contention — raise the client count until it shows — cannot work on
-this architecture; the informative axis is core count. **For extrapolation**,
-because SYNC grows with parallelism while CARD does not, their ratio must
-close: CARD/SYNC falls from 4.5× at 4 workers to 1.66× at 8. Naively continuing
-that trend puts a crossover near 11–16 workers, beyond which contention would
-again dominate. We flag this as an extrapolation from **two** worker-count
-points on differently-provisioned VMs, not a fitted law; it is a hypothesis for
-the follow-up in §7, and the honest present claim is bounded to 4–8 cores.
+this architecture; the informative axis is core count.
+
+**For extrapolation**, because SYNC grows with parallelism while CARD does not,
+their ratio must close. Both ends of that ratio have to be read off the
+*matched-load* table above rather than mixed with §5.1's pooled estimate:
+matched on workload and client load, CARD/SYNC is 0.790/0.175 = **4.51×** at 4
+workers and 0.724/0.457 = **1.58×** at 8. (§5.1's 1.66× is the unmatched pooled
+estimate over all eight concurrency levels and three workloads; it is the right
+number for the headline claim but the wrong one to pair with a 4-worker figure
+drawn from one workload and one concurrency range.) Extending the matched SYNC
+trend — a factor 2.60 per doubling of workers — with CARD held at its 8-worker
+value puts the crossover at about **11 workers**; fitting SYNC linearly in
+worker count instead puts it at about **12**. Beyond that, contention would
+again dominate.
+
+Two reasons to treat this as a hypothesis rather than a result. It is an
+extrapolation from **two** worker-count points on differently-provisioned VMs,
+not a fitted law. And because client and server are co-located on one VM
+(§4.2), moving from 4 to 8 vCPUs doubles the server's worker pool *and* relaxes
+the client's CPU constraint at the same time, so the contrast varies two things
+at once. The second factor cannot manufacture the effect we report — a less
+CPU-starved client would, if anything, reduce the contention measured at the
+server, and all four axes experience the identical change in client conditions
+while only SYNC moves — but it does mean the 4-versus-8 contrast is a
+direction-of-effect observation, not a rate. The present claim is bounded to
+4–8 cores, and §7 states the experiment that would settle it.
 
 ### 5.3 Result 3 — Overhead rigidity and the percentile-dependent inversion
 
@@ -557,7 +605,9 @@ median-level cost survives into the tail.
 Four of five strategies retain only 38–58% of their median cost at p99: their
 overhead is **elastic**, absorbed by queueing slack, because a few extra
 microseconds of counter work are negligible against a 79 ms queue. HdrHistogram
-retains 82% — its overhead is **rigid**.
+retains 82% — its overhead is **rigid**. The distinction matters because the
+tail, not the median, is what composes across a request fan-out and what
+latency objectives are written against [13].
 
 The axis decomposition localizes the rigidity precisely. Pricing each axis under
 each budget metric:
@@ -593,9 +643,10 @@ Consider the two comparisons involving HdrHistogram:
 | Hdr − Sharded-N | −0.29 [−0.42, −0.15] p = 0.012 | −0.31 [−0.46, −0.17] p = 0.012 | −0.53 [−0.70, −0.36] p = 0.001 | **+0.54 [0.32, 0.75] 11/11 p = 0.001** |
 
 Under a throughput budget, HdrHistogram versus GlobalMutex is **statistically
-unresolved** (p = 0.23) — and remains so under 11× replication; prior analysis
-of this dataset reported it as the one comparison that additional data failed
-to settle. The decomposition shows *why*: the comparison is not weak, it is
+unresolved** (p = 0.23), and remains so under 11× replication — it is the one
+comparison in this dataset that pooling further runs does not settle, and it
+grew *weaker* rather than stronger as runs were added (p ≈ 0.11 at ten runs,
+0.23 at eleven). The decomposition shows *why*: the comparison is not weak, it is
 **sign-ambiguous**. HdrHistogram is decisively *cheaper* at the median
 (0 of 11 runs disagree, p = 0.001) and decisively *costlier* at p99 (11 of 11,
 p = 0.001). Throughput, an aggregate sitting between them, nets the two
@@ -719,8 +770,10 @@ Given that budget, the priority order implied by these results differs from the
 common one:
 
 1. **Reduce metric key cardinality before optimizing the lock — above ~10³
-   labels.** The cardinality axis is worth 1.66× the synchronization axis at 8
-   cores and 4.5× at 4, and a sharded map with a high-cardinality label is
+   labels.** The cardinality axis is worth 1.66× the synchronization axis on the
+   8-core VM and 4.5× on the 4-core one (4.51× and 1.58× when the two counts are
+   matched on workload and client load, §5.2), and a sharded map with a
+   high-cardinality label is
    slower than a global mutex with a low-cardinality one (§5.1). §5.4 shows
    this is the entry count itself rather than the key allocation bundled with
    it, and puts a threshold on the advice: below roughly a thousand live
@@ -740,6 +793,14 @@ common one:
 3. **Do not expect client load to reveal telemetry contention.** On a
    thread-pool server, contention is bounded by the pool. Scale the core count,
    not the client count (§5.2).
+
+The collectors here are hand-written, which is what makes the one-axis-per-pair
+design possible: a general-purpose metrics library fixes several of the axes at
+once. The axes themselves are not specific to hand-written code — the Rust
+`prometheus` and `metrics` crates [28, 39] both expose exactly the choice this
+paper prices, between a label whose value is a bounded command name and one
+whose value is a request datum — and §7 states what a library-level replication
+would and would not settle.
 
 **For performance engineers designing such a study.** Three transferable
 points. *First*, compare designs along axes, not as bundles: a ranking of five
@@ -779,16 +840,20 @@ interval spanning zero. We make the package claim and not the stronger one.
 The §5.3 merge-stall mechanism is an interpretation consistent with the data,
 not a measurement; direct instrumentation of flush duration would test it.
 
-**Construct.** The benchmark client is custom, not YCSB [6], so absolute
+**Construct.** The benchmark client is custom, not YCSB [10], so absolute
 throughputs are not comparable to published YCSB results; the paired
 within-block ratios are unaffected, since every strategy is compared against a
-`disabled` baseline measured by the same client. Client and server share a
-machine, so at the highest concurrencies this is a thread-oversubscription
-stress test rather than an isolated server measurement — which strengthens
-rather than weakens §5.2's negative result, since co-location should if
-anything amplify any concurrency-dependence of overhead. The server is
-restarted per run, but OS state (page cache, socket buffers, port reuse)
-carries over.
+`disabled` baseline measured by the same client. Client and server share one VM
+and communicate over loopback (§4.2), so this is not a network-bound
+measurement: there is no physical network path, and at the highest
+concurrencies it is a thread-oversubscription stress test rather than an
+isolated server measurement. For §5.2's negative result that direction is
+conservative — co-location should if anything amplify any
+concurrency-dependence of overhead, and none appears. For §5.2's worker-count
+result it is not conservative, because changing the vCPU count changes the
+client's CPU budget as well as the server's pool; that limitation is stated
+where the result is claimed. The server is restarted per run, but OS state
+(page cache, socket buffers, port reuse) carries over.
 
 **External.** Both VM sizes are the same Azure family and x86-64 image, so they
 replicate across size, region, and workload but not across hardware families,
@@ -799,15 +864,58 @@ artifact of the D4s_v6 run: a logging bug recorded a placeholder processor
 string in that run's metadata, so while all eleven D8s_v6 runs verifiably share
 one CPU model (Intel Xeon Platinum 8573C), we cannot confirm from the artifact
 that the 4-vCPU VM used the same microarchitecture. A microarchitectural
-difference would confound the SYNC growth we attribute to worker count; the crossover extrapolation
-in §5.2 is explicitly a hypothesis. Nothing here is claimed for NUMA systems,
-substantially higher core counts, or non-x86 architectures. The cardinality
-result is measured at one high-cardinality point (~10⁴ over a 10,000-key
-workload); the shape of the curve between 2 and 10⁴ is not measured.
+difference would confound the SYNC growth we attribute to worker count, and the
+crossover extrapolation in §5.2 is explicitly a hypothesis. The collectors are
+also hand-written rather than drawn from a metrics library, so the measured
+magnitudes are properties of these implementations. Nothing here is claimed for
+NUMA systems, substantially higher core counts, or non-x86 architectures. The
+cardinality curve of §5.4 is measured with one instrument on one server; the
+~10³-entry threshold it reports may be a property of this `DashMap`
+configuration rather than of the class.
 
-**Statistical.** This design resolves paired effects of roughly 0.6–0.75%
-(cluster-aware and injected-effect estimates agree); the PAYLOAD-versus-CARD
-gap (0.02 pp) is far below that floor and no ordering between them is claimed.
+Three experiments would address these limits, and we state them precisely so
+that the present claims can be read against them. *For the worker-count
+result*: a sweep over 2, 4, 8, 16 and 32 vCPUs within one VM family and region,
+with the load generator on a separate VM so that the vCPU count changes only
+the server's worker pool, would turn a two-point observation into a fitted law
+and test the ~11–12-worker crossover directly. *For client placement*:
+repeating the main contrasts at two or three concurrency levels with the load
+generator on a second `Standard_D8s_v6` in the same region would confirm that
+CARD > SYNC survives removal of the co-located client — §5.2's
+concurrency-invariance result is what makes so reduced a replication
+informative. *For generality beyond hand-written collectors*: the same two
+contrasts built on the Rust `prometheus` or `metrics` crate [28, 39], one
+labelled by command name and one by the request's data key, would test whether
+the *ordering* of the axes survives a production library's own fixed costs,
+which is the form of the claim that would transfer.
+
+**Statistical.** Two different quantities have detectability floors here, and
+conflating them would make §5.1's headline look unsupported, so we state which
+is which. The figure of roughly **0.6–0.75% applies to a single cell**: the
+smallest overhead of one strategy against `disabled`, within one (strategy,
+concurrency, workload) cell, that this design detects at 80% power. Three
+calculations agree on it — 0.58% treating all 165 pooled blocks as independent,
+0.69% cluster-aware on the eleven run-level means, and ~0.75% from the
+injected-effect simulation (`scripts/compute_mde.py`,
+`compute_mde_clustered.py`, `simulate_mde.py` respectively).
+
+The headline CARD − SYNC estimate is **not** a quantity of that kind, and the
+floor above does not apply to it. It is a *difference of two paired
+within-block ratios* that share the `sharded_2key` reference, aggregated over
+all 120 cells, with one number per run as the unit of analysis. Differencing
+two contrasts against a common reference cancels the baseline-level noise that
+dominates a single-cell estimate, and aggregating over cells averages the rest
+down. Its realised standard error over the eleven runs is 0.069 pp, so the
+corresponding 80%-power floor for *that* quantity is
+(1.96 + 0.84) × 0.069 ≈ **0.19 pp**. A 0.34 pp difference is therefore resolved
+— CI [0.19, 0.50], sign test p = 0.012 — with no tension against the
+single-cell figure, which is a three- to fourfold coarser quantity measured on
+a different unit.
+
+The per-cell floor remains the correct number for per-cell claims, and it is
+what rules out an ordering between PAYLOAD and CARD: that gap is 0.02 pp, below
+every floor quoted here, and no ordering between them is claimed.
+
 The eleven runs support cluster-aware *t*-intervals with 10 degrees of freedom,
 which are wide; the sign tests are exact and distribution-free, and we report
 both. We ran no live A/A experiment; false-positive calibration comes from a
@@ -825,8 +933,9 @@ We decomposed per-command observability overhead in a concurrent in-memory
 key-value store into four separately-priced design axes, measured across 29,520
 RMIT benchmark runs on fourteen dedicated cloud VMs with inference clustered on
 independent runs. The decomposition contradicts the standard optimization priority: the
-metric-cardinality axis costs 1.66× the synchronization axis at 8 worker
-threads and 4.5× at 4, so a sharded concurrent map carrying a high-cardinality
+metric-cardinality axis costs 1.66× the synchronization axis on the 8-worker VM
+and 4.5× on the 4-worker one (4.51× and 1.58× matched on workload and client
+load), so a sharded concurrent map carrying a high-cardinality
 label is measurably slower than a single global mutex carrying a low-cardinality
 one. It also shows that these costs answer to different variables — no axis
 responds to a 30× increase in client concurrency on a thoroughly saturated
@@ -859,46 +968,97 @@ threshold is a property of this server or of the class.
 
 ---
 
+## Data Availability
+
+All source code, raw benchmark data (29,520 runs), analysis scripts and figure
+code are in the public repository <https://github.com/Saksham932007/RustRedis>.
+The version corresponding to this manuscript is tagged `v1.0-paper` and
+archived with a persistent identifier: **DOI: 10.5281/zenodo.XXXXXXX**
+*(placeholder — the Zenodo deposition is created from the `v1.0-paper` GitHub
+release and the DOI inserted here before submission; see
+`submission/SUBMISSION_CHECKLIST.md`).* Appendix A lists the commands that
+regenerate every table, figure and quoted statistic in §5 from the committed
+raw data.
+
+## Declaration of Generative AI Use
+
+Generative AI tools (large language models accessed through a coding assistant)
+were used during this work for code authoring and refactoring of the
+experiment runner, analysis scripts and figure code; for drafting and
+copy-editing of the manuscript text; and for literature search. They were not used
+to generate, simulate, impute or alter any experimental measurement: every
+number reported here derives from the committed raw benchmark data by the
+committed analysis scripts, each of which was run and inspected by the author.
+The author designed the experiments, verified the analyses and the cited
+literature, and takes full responsibility for the content of this manuscript.
+
 ## References
 
 1. Abedi, A. and Brecht, T. (2017). Conducting Repeatable Experiments in Highly Variable Cloud Computing Environments. *ICPE '17*, 287–292.
 2. Abedi, A., Heard, A., and Brecht, T. (2015). Conducting Repeatable Experiments and Fair Comparisons using 802.11n MIMO Networks. *ACM SIGOPS Operating Systems Review*, 49(1), 41–50.
-3. Aspnes, J., Herlihy, M., and Shavit, N. (1994). Counting Networks. *Journal of the ACM*, 41(5), 1020–1048.
-4. Boyd-Wickizer, S., Clements, A. T., Mao, Y., Pesterev, A., Kaashoek, M. F., Morris, R., and Zeldovich, N. (2010). An Analysis of Linux Scalability to Many Cores. *OSDI '10*.
-5. Bulej, L., Horký, V., Tůma, P., Farquet, F., and Prokopec, A. (2020). Duet Benchmarking: Improving Measurement Accuracy in the Cloud. *ICPE '20*, 100–107.
-6. Cooper, B. F., Silberstein, A., Tam, E., Ramakrishnan, R., and Sears, R. (2010). Benchmarking Cloud Serving Systems with YCSB. *SoCC '10*, 143–154.
-7. Curtsinger, C. and Berger, E. D. (2013). STABILIZER: Statistically Sound Performance Evaluation. *ASPLOS '13*, 219–228.
-8. David, T., Guerraoui, R., and Trigonakis, V. (2013). Everything You Always Wanted to Know About Synchronization but Were Afraid to Ask. *SOSP '13*, 33–48.
-9. Fan, B., Andersen, D. G., and Kaminsky, M. (2013). MemC3: Compact and Concurrent MemCache with Dumber Caching and Smarter Hashing. *NSDI '13*, 371–384.
-10. Fruth, M., Scherzinger, S., Mauerer, W., and Ramsauer, R. (2021). Tell-Tale Tail Latencies: Pitfalls and Perils in Database Benchmarking. *TPCTC 2021*, LNCS 13169, 119–134.
-11. Georges, A., Buytaert, D., and Eeckhout, L. (2007). Statistically Rigorous Java Performance Evaluation. *OOPSLA '07*, 57–76.
-12. Kalibera, T. and Jones, R. E. (2013). Rigorous Benchmarking in Reasonable Time. *ISMM '13*, 63–74.
-13. Laaber, C., Scheuner, J., and Leitner, P. (2019). Software Microbenchmarking in the Cloud. How Bad is it Really? *Empirical Software Engineering*, 24(4), 2469–2508.
-14. Maricq, A., Duplyakin, D., Jimenez, I., Maltzahn, C., Stutsman, R., and Ricci, R. (2018). Taming Performance Variability. *OSDI '18*, 409–425.
-15. Mytkowicz, T., Diwan, A., Hauswirth, M., and Sweeney, P. F. (2009). Producing Wrong Data Without Doing Anything Obviously Wrong! *ASPLOS '09*, 265–276.
-16. Reniers, V., Van Landuyt, D., Rafique, A., and Joosen, W. (2017). On the State of NoSQL Benchmarks. *ICPE '17 Companion*, 107–112.
-17. Sigelman, B. H., Barroso, L. A., Burrows, M., Stephenson, P., Plakal, M., Beaver, D., Jaspan, S., and Shanbhag, C. (2010). Dapper, a Large-Scale Distributed Systems Tracing Infrastructure. Google Technical Report.
-18. Tallent, N. R., Mellor-Crummey, J., and Porterfield, A. (2010). Analyzing Lock Contention in Multithreaded Applications. *PPoPP '10*, 269–280.
-19. Tene, G. HdrHistogram: A High Dynamic Range Histogram. https://github.com/HdrHistogram/HdrHistogram
-20. Uta, A., Custura, A., Duplyakin, D., Jimenez, I., Rellermeyer, J., Maltzahn, C., Ricci, R., and Iosup, A. (2020). Is Big Data Performance Reproducible in Modern Cloud Networks? *NSDI '20*, 513–527.
-
----
+3. Adams, C., Alonso, L., Atkin, B., Banning, J., Bhola, S., Buskens, R., Chen, M., Chen, X., Chung, Y., Jia, Q., Sakharov, N., Talbot, G., Tart, A., and Taylor, N. (2020). Monarch: Google's Planet-Scale In-Memory Time Series Database. *Proceedings of the VLDB Endowment*, 13(12), 3181–3194.
+4. Aspnes, J., Herlihy, M., and Shavit, N. (1994). Counting Networks. *Journal of the ACM*, 41(5), 1020–1048.
+5. Bartolomeo, J. (2020). Lock-free Observations for Prometheus Histograms. Grafana Labs Blog. https://grafana.com/blog/2020/01/08/lock-free-observations-for-prometheus-histograms/
+6. Bos, M. (2023). *Rust Atomics and Locks: Low-Level Concurrency in Practice*. O'Reilly Media.
+7. Boyd-Wickizer, S., Clements, A. T., Mao, Y., Pesterev, A., Kaashoek, M. F., Morris, R., and Zeldovich, N. (2010). An Analysis of Linux Scalability to Many Cores. *OSDI '10*.
+8. Brazil, B. (2018). *Prometheus: Up & Running — Infrastructure and Application Performance Monitoring*. O'Reilly Media.
+9. Bulej, L., Horký, V., Tůma, P., Farquet, F., and Prokopec, A. (2020). Duet Benchmarking: Improving Measurement Accuracy in the Cloud. *ICPE '20*, 100–107.
+10. Cooper, B. F., Silberstein, A., Tam, E., Ramakrishnan, R., and Sears, R. (2010). Benchmarking Cloud Serving Systems with YCSB. *SoCC '10*, 143–154.
+11. Curtsinger, C. and Berger, E. D. (2013). STABILIZER: Statistically Sound Performance Evaluation. *ASPLOS '13*, 219–228.
+12. David, T., Guerraoui, R., and Trigonakis, V. (2013). Everything You Always Wanted to Know About Synchronization but Were Afraid to Ask. *SOSP '13*, 33–48.
+13. Dean, J. and Barroso, L. A. (2013). The Tail at Scale. *Communications of the ACM*, 56(2), 74–80.
+14. Fan, B., Andersen, D. G., and Kaminsky, M. (2013). MemC3: Compact and Concurrent MemCache with Dumber Caching and Smarter Hashing. *NSDI '13*, 371–384.
+15. Fruth, M., Scherzinger, S., Mauerer, W., and Ramsauer, R. (2021). Tell-Tale Tail Latencies: Pitfalls and Perils in Database Benchmarking. *TPCTC 2021*, LNCS 13169, 119–134.
+16. Georges, A., Buytaert, D., and Eeckhout, L. (2007). Statistically Rigorous Java Performance Evaluation. *OOPSLA '07*, 57–76.
+17. Gregg, B. (2020). *Systems Performance: Enterprise and the Cloud*, 2nd edition. Addison-Wesley.
+18. HdrHistogram contributors. hdrhistogram_rust: A Rust port of HdrHistogram. https://github.com/HdrHistogram/HdrHistogram_rust
+19. Kaldor, J., Mace, J., Bejda, M., Gao, E., Kuropatwa, W., O'Neill, J., Ong, K. W., Schaller, B., Shan, P., Viscomi, B., Venkataraman, V., Veeraraghavan, K., and Song, Y. J. (2017). Canopy: An End-to-End Performance Tracing and Analysis System. *SOSP '17*, 34–50.
+20. Kalibera, T. and Jones, R. E. (2013). Rigorous Benchmarking in Reasonable Time. *ISMM '13*, 63–74.
+21. Karumuri, S., Solleza, F., Zdonik, S., and Tatbul, N. (2020). Towards Observability Data Management at Scale. *ACM SIGMOD Record*, 49(4), 18–23.
+22. Laaber, C., Scheuner, J., and Leitner, P. (2019). Software Microbenchmarking in the Cloud. How Bad is it Really? *Empirical Software Engineering*, 24(4), 2469–2508.
+23. Leitner, P. and Cito, J. (2016). Patterns in the Chaos — A Study of Performance Variation and Predictability in Public IaaS Clouds. *ACM Transactions on Internet Technology*, 16(3), 15:1–15:23.
+24. Lim, H., Han, D., Andersen, D. G., and Kaminsky, M. (2014). MICA: A Holistic Approach to Fast In-Memory Key-Value Storage. *NSDI '14*, 429–444.
+25. Luk, C.-K., Cohn, R., Muth, R., Patil, H., Klauser, A., Lowney, G., Wallace, S., Reddi, V. J., and Hazelwood, K. (2005). Pin: Building Customized Program Analysis Tools with Dynamic Instrumentation. *PLDI '05*, 190–200.
+26. Maricq, A., Duplyakin, D., Jimenez, I., Maltzahn, C., Stutsman, R., and Ricci, R. (2018). Taming Performance Variability. *OSDI '18*, 409–425.
+27. Mellor-Crummey, J. M. and Scott, M. L. (1991). Algorithms for Scalable Synchronization on Shared-Memory Multiprocessors. *ACM Transactions on Computer Systems*, 9(1), 21–65.
+28. metrics-rs contributors. metrics: A metrics ecosystem for Rust. https://github.com/metrics-rs/metrics
+29. Mytkowicz, T., Diwan, A., Hauswirth, M., and Sweeney, P. F. (2009). Producing Wrong Data Without Doing Anything Obviously Wrong! *ASPLOS '09*, 265–276.
+30. Nishtala, R., Fugal, H., Grimm, S., Kwiatkowski, M., Lee, H., Li, H. C., McElroy, R., Paleczny, M., Peek, D., Saab, P., Stafford, D., Tung, T., and Venkataramani, V. (2013). Scaling Memcache at Facebook. *NSDI '13*, 385–398.
+31. Nõu, A., Talluri, S., Iosup, A., and Bonetta, D. (2025). Investigating Performance Overhead of Distributed Tracing in Microservices and Serverless Systems. *ICPE Companion '25*.
+32. OpenTelemetry Authors. OpenTelemetry Specification. https://opentelemetry.io/docs/specs/otel/
+33. Papadopoulos, A. V., Versluis, L., Bauer, A., Herbst, N., von Kistowski, J., Ali-Eldin, A., Abad, C. L., Amaral, J. N., Tůma, P., and Iosup, A. (2021). Methodological Principles for Reproducible Performance Evaluation in Cloud Computing. *IEEE Transactions on Software Engineering*, 47(8).
+34. Pelkonen, T., Franklin, S., Teller, J., Cavallaro, P., Huang, Q., Meza, J., and Veeraraghavan, K. (2015). Gorilla: A Fast, Scalable, In-Memory Time Series Database. *Proceedings of the VLDB Endowment*, 8(12), 1816–1827.
+35. Prometheus Authors. Metric and Label Naming. Prometheus documentation. https://prometheus.io/docs/practices/naming/
+36. Reichelt, D. G., Kühne, S., and Hasselbring, W. (2021). Overhead Comparison of OpenTelemetry, inspectIT and Kieker. *Symposium on Software Performance (SSP) 2021*, CEUR Workshop Proceedings Vol. 3043.
+37. Reichelt, D. G., Bulej, L., Jung, R., and van Hoorn, A. (2024). Overhead Comparison of Instrumentation Frameworks. *ICPE '24 Companion*.
+38. Reniers, V., Van Landuyt, D., Rafique, A., and Joosen, W. (2017). On the State of NoSQL Benchmarks. *ICPE '17 Companion*, 107–112.
+39. Rust Prometheus contributors. rust-prometheus: Prometheus instrumentation library for Rust applications. https://github.com/tikv/rust-prometheus
+40. Sigelman, B. H., Barroso, L. A., Burrows, M., Stephenson, P., Plakal, M., Beaver, D., Jaspan, S., and Shanbhag, C. (2010). Dapper, a Large-Scale Distributed Systems Tracing Infrastructure. Google Technical Report.
+41. Tallent, N. R., Mellor-Crummey, J., and Porterfield, A. (2010). Analyzing Lock Contention in Multithreaded Applications. *PPoPP '10*, 269–280.
+42. Tene, G. HdrHistogram: A High Dynamic Range Histogram. https://github.com/HdrHistogram/HdrHistogram
+43. Tokio Contributors. Tokio: An Asynchronous Runtime for the Rust Programming Language. https://tokio.rs
+44. Uta, A., Custura, A., Duplyakin, D., Jimenez, I., Rellermeyer, J., Maltzahn, C., Ricci, R., and Iosup, A. (2020). Is Big Data Performance Reproducible in Modern Cloud Networks? *NSDI '20*, 513–527.
+45. van Hoorn, A., Waller, J., and Hasselbring, W. (2012). Kieker: A Framework for Application Performance Monitoring and Dynamic Software Analysis. *ICPE '12*, 247–248.
+46. xacrimon. DashMap: Blazingly Fast Concurrent Map in Rust. https://github.com/xacrimon/dashmap
 
 ## Appendix A. Reproducibility
 
 All raw data, analysis code, and figure code are committed.
 
 ```bash
-# Every table and statistic in §5 (also writes experiments/design_axes_analysis.json)
+# Every table and statistic in §5.0-§5.3
+# (also writes experiments/design_axes_analysis.json)
 python3 scripts/analyze_design_axes.py
 
-# Figures 1-3, recomputed from the same helpers the tables use
+# Figures 1-4, recomputed from the same helpers the tables use; each is written
+# as a 200-dpi PNG and as a vector PDF into docs/figures/
 python3 scripts/generate_design_axes_figures.py
 
 # Section 5.4: the axis-separation experiment (8 independent runs)
 python3 scripts/combine_iterations.py \
     --input-dir experiments/azure_d8s_v6_followup \
     --output-dir experiments/azure_d8s_v6_followup/pooled
+# (writes experiments/design_axes_followup_analysis.json)
 python3 scripts/analyze_design_axes.py --followup-only \
     --pooled-csv experiments/azure_d8s_v6_followup/pooled/raw_data_rmit.csv
 ```
@@ -939,8 +1099,11 @@ Per-run machine specs, commit hash, and full runtime configuration are recorded
 in each run's `metadata_rmit.json`. Supporting analyses referenced in §4.3 and
 §7 (detectable-effect floors, cluster-aware bounds, injected-effect simulation)
 are in `scripts/compute_mde.py`, `compute_mde_clustered.py`, and
-`simulate_mde.py`; the companion measurement study of this dataset is
-`docs/paper_draft.md`.
+`simulate_mde.py`.
+
+The Python analysis code needs `numpy`, `pandas`, `scipy` and `matplotlib`;
+`requirements.txt` at the repository root pins the set that produced the
+committed numbers.
 
 ## Appendix B. Axis arithmetic
 

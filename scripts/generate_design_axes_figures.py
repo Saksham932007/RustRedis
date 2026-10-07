@@ -5,16 +5,24 @@ Every value plotted is recomputed here by importing the same helper functions
 that scripts/analyze_design_axes.py uses for its tables, so the figures and the
 tables are two views of one computation and cannot silently drift apart.
 
-  Figure 1  docs/figures/axes_fig1_decomposition.png
+Each figure is written twice: a 200-dpi PNG for the Markdown manuscript and
+the README, and a vector PDF for journal submission (text kept as embedded
+Type 42 fonts, not outlines, so it stays selectable and searchable).
+
+  Figure 1  docs/figures/axes_fig1_decomposition.{png,pdf}
             The four design-axis penalties with cluster-aware 95% CIs.
-  Figure 2  docs/figures/axes_fig2_scaling.png
+  Figure 2  docs/figures/axes_fig2_scaling.{png,pdf}
             The same penalties vs client concurrency (flat) and vs worker
             threads (only the synchronization axis moves).
-  Figure 3  docs/figures/axes_fig3_rigidity.png
+  Figure 3  docs/figures/axes_fig3_rigidity.{png,pdf}
             Median-vs-tail cost per strategy: which overheads survive into p99.
-  Figure 4  docs/figures/axes_fig4_cardinality_curve.png
+  Figure 4  docs/figures/axes_fig4_cardinality_curve.{png,pdf}
             Cost against live metric-map entries, with per-operation work held
             constant across the sweep (follow-up dataset, 8 runs).
+
+Figure widths are capped at COLUMN_WIDTH_IN and the base type size is set from
+BASE_PT so that a figure placed at the journal's full text width is reproduced
+at roughly 1:1 and its axis labels stay at or above 9 pt on the page.
 
 Colors are slots 1-5 of the validated categorical reference palette, assigned in
 fixed order and never cycled. Every series also carries a redundant non-color
@@ -65,15 +73,37 @@ STRAT_LABEL = {
     "sharded_n": "Sharded-N",
 }
 
+# Target page geometry. Wiley's single-column research-article layout gives a
+# text width of about 5.4 in; figures are authored no wider than COLUMN_WIDTH_IN
+# so that placing one at full text width is close to a 1:1 reproduction rather
+# than a 2x reduction that shrinks 10 pt labels to 5 pt.
+COLUMN_WIDTH_IN = 6.6
+BASE_PT = 10.0
+
 plt.rcParams.update({
     "figure.facecolor": "white", "axes.facecolor": "white",
     "savefig.facecolor": "white", "axes.edgecolor": "#898781",
     "axes.labelcolor": "#0b0b0b", "text.color": "#0b0b0b",
     "xtick.color": "#52514e", "ytick.color": "#52514e",
     "axes.grid": True, "grid.color": "#e1e0d9", "grid.linewidth": 0.8,
-    "axes.axisbelow": True, "font.size": 10.5, "font.family": "sans-serif",
+    "axes.axisbelow": True, "font.size": BASE_PT, "font.family": "sans-serif",
     "legend.frameon": False,
+    # Vector output: embed real TrueType fonts (Type 42) rather than Type 3,
+    # which several publishers reject, and keep text as text.
+    "pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
 })
+
+
+def save(fig, stem: str) -> None:
+    """Write one figure as both a 200-dpi PNG and a vector PDF."""
+    # CreationDate None keeps the PDF byte-identical across runs, so a
+    # reproduction can be checked with `git status` rather than by eye.
+    for ext, kwargs in (("png", {"dpi": 200}),
+                        ("pdf", {"metadata": {"CreationDate": None}})):
+        out = FIG_DIR / f"{stem}.{ext}"
+        fig.savefig(out, bbox_inches="tight", **kwargs)
+        print(f"  wrote {out}")
+    plt.close(fig)
 
 print("loading datasets ...")
 POOL = load_blocks(POOLED)
@@ -85,7 +115,7 @@ D8_MATCHED = load_blocks(POOLED, workload="mixed",
 # --------------------------------------------------------------------------- #
 def figure1() -> None:
     """Horizontal bars: the four axis penalties, 8-worker pooled dataset."""
-    fig, ax = plt.subplots(figsize=(7.4, 3.5))
+    fig, ax = plt.subplots(figsize=(COLUMN_WIDTH_IN, 3.4))
     ys, vals, los, his = [], [], [], []
     for i, axis in enumerate(AXIS_ORDER):
         a, b = CONTRASTS[axis]
@@ -115,16 +145,13 @@ def figure1() -> None:
                  fontsize=11, loc="left", pad=10)
     ax.grid(axis="y", visible=False)
     fig.tight_layout()
-    out = FIG_DIR / "axes_fig1_decomposition.png"
-    fig.savefig(out, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  wrote {out}")
+    save(fig, "axes_fig1_decomposition")
 
 
 def figure2() -> None:
     """Two panels: penalty vs client concurrency, and penalty vs worker threads."""
-    fig, (axa, axb) = plt.subplots(1, 2, figsize=(9.6, 3.9),
-                                   gridspec_kw={"width_ratios": [1.65, 1]})
+    fig, (axa, axb) = plt.subplots(2, 1, figsize=(COLUMN_WIDTH_IN, 5.6),
+                                   gridspec_kw={"height_ratios": [1.35, 1]})
     conc = sorted({k[1] for k in POOL})
 
     for axis in AXIS_ORDER:
@@ -178,7 +205,8 @@ def figure2() -> None:
     axb.set_xlim(3.5, 9.6)
     axb.set_title("(b) 2$\\times$ the workers, matched client load:\nonly SYNC moves",
                   fontsize=10.5, loc="left")
-    axb.tick_params(labelleft=False)
+    # Panels are stacked, not side by side, so (b) carries its own y scale.
+    axb.set_ylabel("axis cost (percentage points)")
 
     handles, labels = axa.get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=4,
@@ -186,15 +214,12 @@ def figure2() -> None:
     fig.suptitle("Client concurrency is the wrong knob; hardware parallelism is the right one",
                  fontsize=11.5, x=0.012, ha="left", y=1.03)
     fig.tight_layout()
-    out = FIG_DIR / "axes_fig2_scaling.png"
-    fig.savefig(out, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  wrote {out}")
+    save(fig, "axes_fig2_scaling")
 
 
 def figure3() -> None:
     """Dumbbell: each strategy's cost at the median vs at p99."""
-    fig, ax = plt.subplots(figsize=(7.8, 4.1))
+    fig, ax = plt.subplots(figsize=(COLUMN_WIDTH_IN, 4.0))
     order = sorted(COSTLY, key=lambda s: -cluster_ci(by_run(POOL, lambda b, s=s: cost(b, s, "p50")))[0])
     for i, s in enumerate(order):
         p50 = cluster_ci(by_run(POOL, lambda b, s=s: cost(b, s, "p50")))[0]
@@ -227,10 +252,7 @@ def figure3() -> None:
                  "index = p99 cost ÷ p50 cost; ~1 means the cost survives into the tail",
                  fontsize=11, loc="left", pad=10)
     fig.tight_layout()
-    out = FIG_DIR / "axes_fig3_rigidity.png"
-    fig.savefig(out, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  wrote {out}")
+    save(fig, "axes_fig3_rigidity")
 
 
 FOLLOWUP = ROOT / "experiments" / "azure_d8s_v6_followup" / "pooled" / "raw_data_rmit.csv"
@@ -272,7 +294,7 @@ def figure4() -> None:
         else:
             paired.append(cluster_ci(by_run(blocks, contrast_fn(cfg, base, "throughput"))))
 
-    fig, (axa, axb) = plt.subplots(1, 2, figsize=(10.2, 4.1))
+    fig, (axa, axb) = plt.subplots(2, 1, figsize=(COLUMN_WIDTH_IN, 6.0))
 
     # (a) paired difference -- the tested quantity
     ys = [v[0] for v in paired]
@@ -318,10 +340,7 @@ def figure4() -> None:
     fig.suptitle("Metric cardinality only starts costing above ~10$^3$ entries",
                  fontsize=11.5, x=0.012, ha="left", y=1.02)
     fig.tight_layout()
-    out = FIG_DIR / "axes_fig4_cardinality_curve.png"
-    fig.savefig(out, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  wrote {out}")
+    save(fig, "axes_fig4_cardinality_curve")
 
 
 if __name__ == "__main__":

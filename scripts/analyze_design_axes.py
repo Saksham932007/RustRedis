@@ -511,7 +511,12 @@ def statistics_median(values):
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--json-out", default=str(REPO / "experiments" / "design_axes_analysis.json"))
+    ap.add_argument("--json-out", default=None,
+                    help="Where to write the machine-readable results. The default "
+                         "depends on the mode: experiments/design_axes_analysis.json "
+                         "for a full run, experiments/design_axes_followup_analysis.json "
+                         "for --followup-only, so that running both in sequence (as "
+                         "Appendix A does) does not have the second clobber the first.")
     ap.add_argument("--pooled-csv", default=str(POOLED),
                     help="Pooled dataset to analyse (default: the 11-run main batch). "
                          "Point at the follow-up pool to price the split axes.")
@@ -520,6 +525,10 @@ def main() -> None:
                          "and cardinality curve (for the follow-up dataset, which "
                          "does not contain the full main-paper design).")
     args = ap.parse_args()
+    if args.json_out is None:
+        name = ("design_axes_followup_analysis.json" if args.followup_only
+                else "design_axes_analysis.json")
+        args.json_out = str(REPO / "experiments" / name)
 
     pooled = load_blocks(Path(args.pooled_csv))
     d4s = load_blocks(D4S)

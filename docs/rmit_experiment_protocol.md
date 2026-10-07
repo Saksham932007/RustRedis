@@ -18,7 +18,7 @@ Highly Variable Cloud Computing Environments," ICPE 2017, not invented for
 this project — fixes this: every repetition executes all (strategy,
 concurrency) pairs in a fresh random order, so time-varying machine state
 is spread evenly across strategies instead of confounded with them. See
-`docs/paper_draft.md` §1 for the full related-work comparison, including
+`archive/paper_draft.md` §1 for the full related-work comparison, including
 Laaber et al. (2019), who apply the same technique to cloud
 microbenchmarking.
 

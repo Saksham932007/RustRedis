@@ -45,8 +45,7 @@ Everything is affordable in absolute terms: no strategy costs more than **1.8%**
 throughput (2.2% at p50). The question is never *whether* to instrument, but *how*.
 
 Full write-up: **[docs/final_paper_v27.md](docs/final_paper_v27.md)** — *"Cardinality
-Before Contention"*. The underlying measurement study is
-[docs/paper_draft.md](docs/paper_draft.md).
+Before Contention"*, prepared for submission to *Software: Practice and Experience*.
 
 ## The collectors as a factorial design
 
@@ -235,6 +234,9 @@ for reading a small dry run's raw output.
 ## Quick start
 
 ```bash
+# 0. Analysis dependencies (Python 3.10+)
+python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+
 # 1. Build
 cargo build --release --bin server
 cargo build --release --manifest-path benchmarks/Cargo.toml
@@ -251,9 +253,14 @@ python3 scripts/run_rmit_experiment.py \
 
 # 4. Pool runs and regenerate every number and figure in the paper
 python3 scripts/combine_iterations.py --input-dir <runs-dir> --output-dir <runs-dir>/pooled
-python3 scripts/analyze_design_axes.py
-python3 scripts/generate_design_axes_figures.py
+python3 scripts/analyze_design_axes.py              # -> experiments/design_axes_analysis.json
+python3 scripts/generate_design_axes_figures.py     # -> docs/figures/*.{png,pdf}
 ```
+
+The analysis commands run against the committed data as-is: they need no cloud
+VM and regenerate every table, figure and quoted statistic in the paper. Their
+outputs are byte-identical on re-run, so a successful reproduction from a fresh
+clone leaves `git status` clean.
 
 Both protocol docs include a manual machine-control checklist (power, sleep, background
 processes) that materially affects result quality, plus the Azure VM path. Run the
@@ -284,19 +291,23 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
 │   ├── azure_d4s_v6/          D4s_v6, single run
 │   ├── azure_d8s_v6/          D8s_v6: run_00..run_10 + pooled/ (11 runs)
 │   └── azure_d8s_v6_followup/ D8s_v6 axis separation: run_01..run_08 + pooled/
-├── docs/                      Papers, protocols, design notes, figures
+├── docs/                      Manuscript, protocols, design notes, figures
+├── submission/                Cover letter and pre-submission checklist
+├── archive/                   Superseded drafts and their figures
+├── CITATION.cff               How to cite the artifact and the paper
+├── requirements.txt           Python deps for the analysis and figure scripts
 └── LICENSE
 ```
 
 ## Documentation
 
 - [docs/final_paper_v27.md](docs/final_paper_v27.md) — **"Cardinality Before
-  Contention"**, the design-axis decomposition paper and the one with the novel claim
-  (also available as `final_paper_v27.docx`). Every table, figure and quoted statistic
-  regenerates from committed artifacts.
-- [docs/paper_draft.md](docs/paper_draft.md) — the underlying RMIT measurement study:
-  overhead magnitudes, strategy ranking, 11-run replication, detectable-effect analysis.
-- [docs/README.md](docs/README.md) — index explaining how the two papers relate.
+  Contention"**, the manuscript (also available as `final_paper_v27.docx`). Every table,
+  figure and quoted statistic regenerates from committed artifacts; see its Appendix A.
+- [docs/README.md](docs/README.md) — index of the documentation.
+- [submission/](submission) — cover letter and pre-submission checklist.
+- [archive/](archive) — superseded working material, including an earlier
+  measurement-study draft of the same data. Nothing there is cited by the manuscript.
 - [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md) — main protocol
   and Azure VM setup.
 - [docs/followup_experiment_protocol.md](docs/followup_experiment_protocol.md) —
@@ -305,7 +316,7 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
   [docs/failure-analysis.md](docs/failure-analysis.md),
   [docs/related_work_notes.md](docs/related_work_notes.md)
 - [docs/figures/](docs/figures) — paper figures (axis decomposition, scaling, rigidity,
-  cardinality curve).
+  cardinality curve), each as a 200-dpi PNG and a vector PDF for submission.
 
 ## Architecture overview
 
@@ -331,6 +342,12 @@ Core modules:
 - [src/command_metrics.rs](src/command_metrics.rs): the eight metrics collectors
 - [src/metrics.rs](src/metrics.rs): process/system counters
 - [src/pubsub.rs](src/pubsub.rs): pub/sub manager
+
+## Citing this work
+
+See [CITATION.cff](CITATION.cff). The release corresponding to the manuscript is
+tagged `v1.0-paper`; the archived-snapshot DOI will be added here once the Zenodo
+deposition is created (see `submission/SUBMISSION_CHECKLIST.md`).
 
 ## License
 

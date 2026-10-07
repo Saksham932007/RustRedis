@@ -1,0 +1,43 @@
+cff-version: 1.2.0
+message: "If you use this software or its data, please cite both the software artifact and the paper below."
+title: "RustRedis: a Redis-compatible in-memory key-value server for measuring per-command observability overhead"
+abstract: >-
+  RustRedis is a Redis-compatible in-memory key-value server written in Rust,
+  instrumented with eight interchangeable per-command metrics collectors chosen
+  so that adjacent pairs differ along exactly one design axis (synchronization
+  discipline, metric key cardinality, aggregation locality, per-sample payload).
+  The repository contains the server, the load generator, the Randomized
+  Multiple Interleaved Trials experiment runner, the raw data from 29,520
+  benchmark runs on fourteen dedicated Azure virtual machines, and the analysis
+  and figure code that regenerates every number in the accompanying paper.
+type: software
+authors:
+  - given-names: Saksham
+    family-names: Kapoor
+    email: sakshamkapoor810@gmail.com
+    affiliation: "Independent Researcher, Delhi, India"
+    # orcid: "https://orcid.org/0000-0000-0000-0000"  # TODO: register at orcid.org and uncomment
+repository-code: "https://github.com/Saksham932007/RustRedis"
+license: MIT
+version: "1.0-paper"
+date-released: "2026-10-07"
+keywords:
+  - instrumentation overhead
+  - metric cardinality
+  - observability
+  - performance measurement
+  - tail latency
+  - key-value store
+  - randomized multiple interleaved trials
+  - Rust
+# doi: "10.5281/zenodo.XXXXXXX"  # TODO: insert the Zenodo DOI for the v1.0-paper release
+preferred-citation:
+  type: article
+  title: "Cardinality Before Contention: A Factorial Decomposition of Per-Command Observability Overhead in a Concurrent In-Memory Key-Value Store"
+  authors:
+    - given-names: Saksham
+      family-names: Kapoor
+      email: sakshamkapoor810@gmail.com
+      affiliation: "Independent Researcher, Delhi, India"
+  year: 2026
+  notes: "Manuscript under preparation; update journal, volume and DOI on acceptance."
