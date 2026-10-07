@@ -7,7 +7,7 @@ The submitted manuscript:
   design axes (synchronization, cardinality, aggregation, payload) and shows
   the cardinality axis dominates the synchronization axis, that the axes scale
   with worker threads rather than client load, and that histogram cost alone
-  survives into the tail. Also available as `final_paper_v27.docx`. Every
+  survives into the tail. Also available as `final_paper_v28.docx`. Every
   table, figure and quoted statistic regenerates from the committed data; see
   the paper's Appendix A.
 

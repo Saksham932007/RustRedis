@@ -150,7 +150,7 @@ Section numbers (§2, §5.2 …) refer to `docs/final_paper_v27.md`.
 - [ ] **Move the paper into the journal's LaTeX template.** *Author action —
       needs Wiley's `wileyNJD-v2` class from the journal's author-guidelines
       page.* The manuscript is venue-neutral Markdown with a regenerated Word
-      export (`docs/final_paper_v27.docx`, rebuilt from the edited Markdown with
+      export (`docs/final_paper_v28.docx`, rebuilt from the edited Markdown with
       all four figures embedded); SPE accepts an initial submission as a single
       PDF, so this can be deferred to revision. Use the vector PDFs in
       `docs/figures/`.

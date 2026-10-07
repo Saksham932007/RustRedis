@@ -302,7 +302,7 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
 ## Documentation
 
 - [docs/final_paper_v27.md](docs/final_paper_v27.md) — **"Cardinality Before
-  Contention"**, the manuscript (also available as `final_paper_v27.docx`). Every table,
+  Contention"**, the manuscript (also available as `final_paper_v28.docx`). Every table,
   figure and quoted statistic regenerates from committed artifacts; see its Appendix A.
 - [docs/README.md](docs/README.md) — index of the documentation.
 - [submission/](submission) — cover letter and pre-submission checklist.
