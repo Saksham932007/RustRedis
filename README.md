@@ -1,5 +1,7 @@
 # RustRedis
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23295261.svg)](https://doi.org/10.5281/zenodo.23295261)
+
 RustRedis is an experimental Redis-compatible in-memory key-value server in Rust (~3,500
 LOC), built to answer one research question: **what does per-command observability
 instrumentation actually cost on a concurrent, network-bound server — and which design
@@ -346,8 +348,8 @@ Core modules:
 ## Citing this work
 
 See [CITATION.cff](CITATION.cff). The release corresponding to the manuscript is
-tagged `v1.0-paper`; the archived-snapshot DOI will be added here once the Zenodo
-deposition is created (see `submission/SUBMISSION_CHECKLIST.md`).
+tagged `v1.0-paper`, archived on Zenodo with DOI
+[10.5281/zenodo.23295261](https://doi.org/10.5281/zenodo.23295261).
 
 ## License
 

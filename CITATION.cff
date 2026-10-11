@@ -30,7 +30,7 @@ keywords:
   - key-value store
   - randomized multiple interleaved trials
   - Rust
-# doi: "10.5281/zenodo.XXXXXXX"  # TODO: insert the Zenodo DOI for the v1.0-paper release
+doi: "10.5281/zenodo.23295261"
 preferred-citation:
   type: article
   title: "Cardinality Before Contention: A Factorial Decomposition of Per-Command Observability Overhead in a Concurrent In-Memory Key-Value Store"
