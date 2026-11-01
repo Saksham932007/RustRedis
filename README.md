@@ -35,7 +35,7 @@ Four findings:
    the comparison to use when pairing them (§5.2).
 2. **The axes obey different scaling laws.** Over a **30× client-concurrency range no
    axis moves** (largest slope 0.041 pp/doubling, CI spans zero) even though the server
-   is genuinely saturated (p99 0.76 ms → 78.9 ms). The synchronization axis tracks
+   is genuinely saturated (p99 0.76 ms → 78.85 ms). The synchronization axis tracks
    *worker threads* instead (**2.6×** from 4 to 8 workers). Turning up client count
    cannot expose telemetry contention on a thread-pool server.
 3. **Overhead has rigidity.** Counter costs are *elastic* — only 38–58% of their median
@@ -49,8 +49,9 @@ Four findings:
    for essentially all of the cardinality axis (and the histogram for ~80% of payload) —
    but the effect is **indistinguishable from zero below ~10³ entries**.
 
-Everything is affordable in absolute terms: no strategy costs more than **1.8%** of
-throughput (2.2% at p50). The question is never *whether* to instrument, but *how*.
+Everything is affordable in absolute terms: no strategy costs more than **1.71 pp** of
+throughput (2.19 pp at p50; the paper quotes the overhead ceiling as ~2.2%). The question
+is never *whether* to instrument, but *how*.
 
 Full write-up: **[docs/final_paper_v27.md](docs/final_paper_v27.md)** — *"Cardinality
 Before Contention"*, prepared for submission to *Software: Practice and Experience*.
