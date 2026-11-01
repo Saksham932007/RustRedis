@@ -2,6 +2,15 @@
 
 **A Systems Research Technical Report**
 
+> **Scope.** This report documents the server implementation — architecture,
+> storage backends, persistence and data structures. Its benchmark findings are
+> the project's own earlier storage-backend and AOF measurements and predate the
+> RMIT experiments; they are *not* the per-command observability-overhead
+> numbers of the manuscript, were not produced by the RMIT design, and are not
+> cited by it. For anything about instrumentation overhead — the design axes,
+> their magnitudes, scaling and percentile behaviour —
+> [`final_paper_v27.md`](final_paper_v27.md) is authoritative.
+
 ---
 
 ## 1. Abstract

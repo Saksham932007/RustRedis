@@ -2,6 +2,13 @@
 
 **Systematic Experiments for Crash Recovery, Partial Writes, and Concurrency Contention**
 
+> **Scope.** These experiments concern the server's crash-recovery, partial-write
+> and contention behaviour. They are orthogonal to the manuscript's
+> observability-overhead measurements and are not cited by it; the one failure
+> mode the manuscript does record is the open-file-descriptor limit that made a
+> first `Standard_D8s_v6` batch report `0 ops/sec`
+> ([`final_paper_v27.md`](final_paper_v27.md) §4.4).
+
 ---
 
 ## Table of Contents

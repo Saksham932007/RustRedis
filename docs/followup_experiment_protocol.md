@@ -52,7 +52,11 @@ consistency check worth stating in the write-up either way.
 `global_mutex` and `sharded_n` are kept in the recommended run purely as
 **anchors**: if this batch does not reproduce the paper's CARD ≈ 0.87 pp and
 SYNC ≈ 0.52 pp, something about the new setup differs and the new numbers should
-not be trusted.
+not be trusted. (As run, SYNC came back at 0.527 against the main batch's 0.522,
+DEFER 0.290 against 0.309 and PAYLOAD 0.967 against 0.885. CARD was 0.642 here
+against 0.866 — intervals overlap, but this batch covers three concurrency
+levels and one workload rather than eight and three, so the main batch remains
+the reference for CARD's magnitude. §5.4.)
 
 ## Sizing
 
@@ -215,3 +219,40 @@ that is an equally publishable result and a more surprising one — it would mea
 the cost of a high-cardinality label is the per-operation key materialization,
 not the map size, which points at a different fix (intern the label) than the
 one the paper currently implies.
+
+## What the batch actually returned (§5.4)
+
+Eight independently provisioned `Standard_D8s_v6` VMs (two rounds of four,
+across Central India ×2, South India and West US 3; same Xeon Platinum 8573C
+and toolchain as the main batch), 540 runs each, **4,320 runs in total**.
+Intervals cluster on the eight runs, *t*(7). Numbers as reported in
+`final_paper_v27.md` §5.4, Tables 13 and 14:
+
+| Quantity | Estimate (pp) | 95% CI | |
+|---|---:|---|---|
+| pure cardinality (2 → 13,040 entries, per-op work identical) | **0.652** | [0.280, 1.024] | resolved |
+| CARD total (`sharded_n` − `sharded_2key`) | 0.642 | [0.316, 0.967] | resolved |
+| histogram alone (`hdr_histogram` − `thread_local_owned`) | **0.773** | [0.539, 1.006] | resolved |
+| PAYLOAD total (`hdr_histogram` − `thread_local`) | 0.967 | [0.709, 1.226] | resolved |
+| key construction, FNV + `format!` (`sharded_bucketed`@1 − `sharded_2key`) | 0.855 | [0.393, 1.317] | resolved |
+| owned-key allocation, TLS path (`thread_local_owned` − `thread_local`) | 0.195 | [−0.017, 0.407] | **not** resolved |
+
+- **The cardinality axis is cardinality, not allocation.** The pure entry-count
+  effect (0.652) accounts for essentially all of CARD's total (0.642), leaving
+  no room for a material allocation component in `sharded_n`'s key path. The
+  PAYLOAD axis is ~80% histogram (0.773 of 0.967), with the residual allocation
+  term unresolved.
+- **The curve is not monotone and not linear in entries; it appears above
+  ~10³.** Paired against the 2-entry configuration: 20 entries +0.097
+  [−0.107, 0.302] and 200 entries +0.089 [−0.175, 0.352] are unresolved, while
+  2,000 entries +0.306 [0.069, 0.543] and 13,040 entries +0.652 [0.280, 1.024]
+  resolve.
+- **The strong form of the headline is not established.** Pure cardinality
+  minus SYNC is +0.125 pp, 95% CI [−0.358, 0.607], agreeing in direction in
+  only 4 of 8 runs. The paper therefore claims the *package* (CARD) against
+  SYNC on the eleven-run main batch, and uses this batch only to establish what
+  the package is made of.
+- **One VM (`run_06`) ran ~30% below its peers** on every configuration.
+  Excluding it moves every contrast by < 0.05 pp, because the paired
+  within-block ratio cancels a level shift that hits numerator and denominator
+  alike.

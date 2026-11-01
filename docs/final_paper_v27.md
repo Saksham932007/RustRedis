@@ -3,14 +3,12 @@
 **Saksham Kapoor**
 Independent Researcher, Delhi, India
 `sakshamkapoor810@gmail.com`
-ORCID: `0000-0000-0000-0000` *(placeholder — register at orcid.org and replace
-before submission; see `submission/SUBMISSION_CHECKLIST.md`)*
+ORCID: `0009-0007-8164-6207`
 
-*Prepared for submission to Software: Practice and Experience (Wiley), with
-Journal of Systems and Software as the backup venue. Reference style and
-section numbering are to be converted to the target journal's template at
-submission; the content below is venue-neutral. Every table, figure, and quoted
-statistic regenerates from committed artifacts via
+*Submitted to Software: Practice and Experience (Wiley). This Markdown source is
+the manuscript of record and matches what was submitted section for section,
+table for table and number for number; only the typesetting differed. Every
+table, figure, and quoted statistic regenerates from committed artifacts via
 `scripts/analyze_design_axes.py` and `scripts/generate_design_axes_figures.py`
 (Appendix A).*
 
@@ -26,7 +24,7 @@ per-command metrics collectors chosen so that adjacent pairs differ along
 exactly one design axis — synchronization discipline, metric key cardinality,
 aggregation locality, per-sample payload — turning a strategy comparison into a
 factorial decomposition, priced by Randomized Multiple Interleaved Trials on
-fourteen separately provisioned Azure VMs.
+fourteen provisioned Azure VMs.
 
 Moving the metric key from a 2-entry command-name label to
 a 10,000-entry data-key label costs 1.66× what replacing a global mutex with a
@@ -39,14 +37,28 @@ axis-dependent rigidity: counter costs dissipate into queueing slack at the
 tail, whereas histogram-payload cost arrives undiminished at p99, producing a
 percentile-dependent rank inversion that throughput-only evaluation reports as
 a confident null. A collector whose per-operation work is identical at every
-cardinality then confirms the effect is live entry count, not key allocation,
+cardinality confirms the effect is live entry count, not key allocation,
 and bounds it: below ~1,000 entries it is indistinguishable from zero.
 
 Observability overhead should therefore be budgeted per design axis and per
 target percentile, not as one headline percentage.
 
 **Keywords:** instrumentation overhead; metric cardinality; performance
-measurement; tail latency; key-value stores; cloud benchmarking
+measurement; tail latency; key-value stores; cloud benchmarking.
+
+---
+
+## Practitioner Points
+
+- At about 10,000 distinct values, a high-cardinality metric label cost more
+  throughput than the global lock that sharding replaces; below roughly 1,000
+  values its cost was not measurable. Check label cardinality before replacing
+  the lock with a sharded map.
+- Choose a metrics collector against the latency percentile you budget:
+  histogram overhead survives undiminished into p99, while counter overhead is
+  largely absorbed at the tail.
+- Telemetry contention scales with worker threads, not client count; benchmark
+  it by varying cores, not by adding clients.
 
 ---
 
@@ -110,6 +122,11 @@ vanishes into queueing slack at the tail, but histogram-payload cost is rigid
 and arrives undiminished at p99, which inverts the cost ranking between
 percentiles and makes throughput-only evaluation actively misleading (§5.3).
 
+The paper addresses a practical software design question — how to instrument
+concurrent server software — and answers it with controlled measurement, in
+keeping with the journal's focus on practice and experience in software
+systems.
+
 ### 1.1 Contributions
 
 1. **A factorial decomposition of per-command observability overhead into four
@@ -144,7 +161,7 @@ percentiles and makes throughput-only evaluation actively misleading (§5.3).
 
 ---
 
-## 2. Background and Related Work
+## 2. Background and Related work
 
 **Instrumentation overhead.** That measurement perturbs what it measures is
 long established; Tallent et al. [41] show it specifically for lock-contention
@@ -234,7 +251,7 @@ worker-count scaling, and the percentile-dependent rigidity result.
 
 ## 3. System Under Study and the Factorial Design
 
-### 3.1 The server
+### 3.1 The Server
 
 RustRedis is a Redis-compatible in-memory key-value server in Rust
 (~3,500 LOC). A Tokio multi-threaded runtime accepts TCP connections, one task
@@ -252,10 +269,12 @@ identically for *all* strategies **including the `disabled` baseline**, so
 those costs cancel in the paired comparison. The only thing that varies is the
 body of `record()`.
 
-### 3.2 The six collectors as a factorial design
+### 3.2 The Six collectors as a Factorial Design
 
 The collectors (`src/command_metrics.rs`) are selected so that adjacent pairs
 differ along one axis:
+
+**Table 1.** The six metrics collectors and their position on each design axis.
 
 | Strategy | Synchronization | Cardinality | Aggregation | Payload |
 |---|---|---:|---|---|
@@ -277,6 +296,8 @@ Cardinality 2 means the metric is keyed by command name (`GET`, `SET`);
 cardinality ~10,000 means it is keyed by the request's data key, over a
 10,000-key workload — the direct analogue of a high-cardinality label such as
 `user_id` in a production metric. This yields four contrasts:
+
+**Table 2.** The four design-axis contrasts and the question each one prices.
 
 | Axis | Contrast | Question it prices |
 |---|---|---|
@@ -335,7 +356,7 @@ dominated by the axis it is named for in both cases.
 
 ---
 
-## 4. Experimental Methodology
+## 4. Experiment Methodology
 
 ### 4.1 Design
 
@@ -352,6 +373,9 @@ strategy in a block met the same machine conditions, so a condition that slowed
 the block slows numerator and denominator alike.
 
 ### 4.2 Datasets
+
+**Table 3.** Datasets, hardware, experimental design and number of benchmark
+runs.
 
 | Dataset | Hardware | Design | Runs |
 |---|---|---|---:|
@@ -403,7 +427,7 @@ directly comparable in strength to the pooled intervals.
 Slopes against concurrency (§5.2) are fitted *within* each run and then averaged
 across runs, so between-run level differences cannot leak into the slope.
 
-### 4.4 A failure mode worth recording
+### 4.4 A Failure mode worth recording
 
 The first attempt at the D8s_v6 design reported exactly `0 ops/sec` for every
 configuration above ~1000 clients, with return code 0 and well-formed output.
@@ -417,6 +441,22 @@ drifting confounds, whereas this was a systematic failure producing
 suspiciously *clean* and *consistent* numbers. No experimental design
 substitutes for reading a small dry run's raw per-sample output.
 
+### 4.5 Use of Generative AI Tools
+
+Generative AI tools were used during this work, as follows. Claude (Anthropic),
+accessed through the Claude app and through Claude Code, Anthropic's agentic
+coding tool, was used for code authoring and refactoring of the experiment
+runner, analysis scripts and figure code, and for drafting and copy-editing of
+the manuscript text. Perplexity (Perplexity AI) was used for literature search;
+every cited work was then located and checked by the author.
+
+These tools were not used to generate, simulate, impute or alter any
+experimental measurement. Every number reported in this paper derives from the
+committed raw benchmark data by the committed analysis scripts, each of which
+was run and inspected by the author. The author designed the experiments,
+verified the analyses and the cited literature, and takes full responsibility
+for the content of this manuscript. No AI tool is listed as an author.
+
 ---
 
 ## 5. Results
@@ -426,11 +466,11 @@ Unless stated otherwise, results are from the 11-run pooled D8s_v6 dataset
 eleven runs, and "pp" denotes percentage points of throughput relative to
 `disabled`.
 
-### 5.0 The strategy ranking depends on the budget metric
+### 5.0 The Strategy ranking depends on the budget metric
 
-Before decomposing, Table 1 prices each strategy under four budget metrics.
+Before decomposing, Table 4 prices each strategy under four budget metrics.
 
-**Table 1.** Cost of each strategy versus `disabled`, by budget metric
+**Table 4.** Cost of each strategy versus `disabled`, by budget metric
 (%, paired within block; 95% CI clustered on 11 runs).
 
 | Strategy | Throughput | Mean latency | p50 latency | p99 latency |
@@ -445,6 +485,9 @@ All overheads are small in absolute terms (≤ 2.2%), consistent with the genera
 finding that per-command telemetry is affordable for this class of system. But
 the *ordering* already differs by metric:
 
+**Table 5.** Strategy ranking from cheapest to costliest under each budget
+metric.
+
 | Budget metric | Ranking (cheapest → costliest) |
 |---|---|
 | Throughput | ThreadLocal < Sharded-2key < GlobalMutex < HdrHistogram < Sharded-N |
@@ -457,7 +500,7 @@ p99. §5.3 shows this is not noise.
 
 ### 5.1 Result 1 — Cardinality costs more than synchronization discipline
 
-**Table 2.** The four design axes priced separately (pp of throughput).
+**Table 6.** The four design axes priced separately (pp of throughput).
 D8s_v6 intervals cluster on 11 runs; D4s_v6 bootstraps over 30 blocks.
 
 | Axis | Contrast | D8s_v6 (8 workers) | Runs agreeing | D4s_v6 (4 workers) |
@@ -502,7 +545,7 @@ We note the PAYLOAD axis is statistically indistinguishable from CARD here
 (0.89 vs 0.87 pp); we do not claim an ordering between them. The claim concerns
 CARD versus SYNC.
 
-### 5.2 Result 2 — The axes obey different scaling laws
+### 5.2 Result 2 — The Axes obey different scaling laws
 
 ![Scaling behaviour](figures/axes_fig2_scaling.png)
 
@@ -512,6 +555,9 @@ band. (b) The same axes at 4 versus 8 worker threads at matched client load.
 
 **Client concurrency does not move any axis.** Fitting each axis against
 log₂(concurrency) within run over 100–3000 clients (§4.3):
+
+**Table 7.** Slope of each axis cost against log₂(client concurrency), fitted
+within run over 100–3000 clients (95% CI clustered on 11 runs).
 
 | Axis | Slope (pp per doubling) | 95% CI | Runs positive | c=100 → c=3000 |
 |---|---:|---|---:|---|
@@ -527,6 +573,9 @@ runs of eleven — a coin flip).
 This is not because the server is idle. Over the same range the `disabled`
 baseline is unambiguously saturated:
 
+**Table 8.** Throughput and latency of the `disabled` baseline at 100, 1000 and
+3000 clients, showing server saturation.
+
 | Clients | Throughput (ops/s) | p50 | p99 |
 |---:|---:|---:|---:|
 | 100 | 290,540 | 0.32 ms | 0.76 ms |
@@ -538,6 +587,9 @@ telemetry cost simply does not participate.
 
 **Worker threads do move the synchronization axis.** At matched client load
 (mixed workload, ≤ 1000 clients), comparing 4 versus 8 worker threads:
+
+**Table 9.** Axis cost at 4 versus 8 worker threads at matched client load
+(mixed workload, ≤ 1000 clients).
 
 | Axis | 4 workers | 8 workers | Ratio |
 |---|---:|---:|---:|
@@ -594,12 +646,15 @@ median-level cost survives into the tail.
 **Figure 3.** Each strategy's cost at the median and at p99. Short dumbbells
 (high index) indicate cost that persists into the tail.
 
+**Table 10.** Tail-concentration index (p99 cost ÷ p50 cost) for each strategy,
+with 95% CI.
+
 | Strategy | p50 cost | p99 cost | Index | 95% CI |
 |---|---:|---:|---:|---|
-| Sharded-N | 2.19% | 0.83% | 0.38 | [0.28, 0.48] |
-| GlobalMutex | 1.79% | 0.78% | 0.43 | [0.30, 0.55] |
-| Sharded-2key | 1.13% | 0.54% | 0.49 | [0.27, 0.71] |
 | ThreadLocal | 0.72% | 0.43% | 0.58 | [0.36, 0.81] |
+| Sharded-2key | 1.13% | 0.54% | 0.49 | [0.27, 0.71] |
+| GlobalMutex | 1.79% | 0.78% | 0.43 | [0.30, 0.55] |
+| Sharded-N | 2.19% | 0.83% | 0.38 | [0.28, 0.48] |
 | **HdrHistogram** | 1.66% | 1.37% | **0.82** | [0.68, 0.96] |
 
 Four of five strategies retain only 38–58% of their median cost at p99: their
@@ -611,6 +666,9 @@ latency objectives are written against [13].
 
 The axis decomposition localizes the rigidity precisely. Pricing each axis under
 each budget metric:
+
+**Table 11.** Cost of each design axis under each budget metric (pp; p99 with
+95% CI clustered on 11 runs).
 
 | Axis | Throughput | Mean | p50 | p99 |
 |---|---|---|---|---|
@@ -636,6 +694,9 @@ not established by it (§7).
 
 **The rank inversion.** This has a sharp consequence for evaluation practice.
 Consider the two comparisons involving HdrHistogram:
+
+**Table 12.** HdrHistogram compared with GlobalMutex and Sharded-N under each
+budget metric (pp, 95% CI, runs agreeing, sign-test p).
 
 | Comparison | Throughput | Mean | p50 | p99 |
 |---|---|---|---|---|
@@ -691,7 +752,7 @@ coverage here. Intervals cluster on the eight runs, t(7).
 concurrency levels and one workload rather than eight and three, so the main
 batch remains the reference for CARD's magnitude.
 
-**Table 6.** The bundled axes, decomposed (pp of throughput, 95% CI clustered
+**Table 13.** The bundled axes, decomposed (pp of throughput, 95% CI clustered
 on 8 runs).
 
 | Quantity | Estimate | 95% CI | |
@@ -732,6 +793,10 @@ broadly similar interval widths here; the paired comparison wins by removing
 the baseline instrumentation cost common to every cardinality, not by being
 tighter.
 
+**Table 14.** Cost against live metric-map entries, with per-operation work
+held constant (paired against the 2-entry configuration; 95% CI clustered on 8
+runs).
+
 | Data entries | Cost vs `disabled` | vs 2 entries | |
 |---:|---:|---|---|
 | 2 | 1.707% | (reference) | |
@@ -756,7 +821,7 @@ present batch establishes what the package is made of, not a new ordering.
 **An unplanned demonstration of why the paired design matters.** One of the
 eight VMs (`run_06`) returned absolute throughput about 30% below its peers
 across every configuration — a degraded or noisy instance of exactly the kind
-§2 warns about. Recomputing every contrast in Table 6 with that run excluded
+§2 warns about. Recomputing every contrast in Table 13 with that run excluded
 moves each by less than 0.05 pp, because the paired within-block ratio cancels
 a level shift that affects numerator and denominator alike. A design comparing
 absolute throughputs across instances would have been badly distorted by the
@@ -973,24 +1038,28 @@ threshold is a property of this server or of the class.
 All source code, raw benchmark data (29,520 runs), analysis scripts and figure
 code are in the public repository <https://github.com/Saksham932007/RustRedis>.
 The version corresponding to this manuscript is tagged `v1.0-paper` and
-archived with a persistent identifier: **DOI: 10.5281/zenodo.XXXXXXX**
-*(placeholder — the Zenodo deposition is created from the `v1.0-paper` GitHub
-release and the DOI inserted here before submission; see
-`submission/SUBMISSION_CHECKLIST.md`).* Appendix A lists the commands that
+archived with a persistent identifier [47]: **DOI:
+<https://doi.org/10.5281/zenodo.23295261>**. Appendix A lists the commands that
 regenerate every table, figure and quoted statistic in §5 from the committed
 raw data.
 
+## Conflict of Interest
+
+The author declares no conflict of interest.
+
+## Funding
+
+This research received no specific grant from any funding agency. All cloud
+computing costs were paid personally by the author.
+
 ## Declaration of Generative AI Use
 
-Generative AI tools (large language models accessed through a coding assistant)
-were used during this work for code authoring and refactoring of the
-experiment runner, analysis scripts and figure code; for drafting and
-copy-editing of the manuscript text; and for literature search. They were not used
-to generate, simulate, impute or alter any experimental measurement: every
-number reported here derives from the committed raw benchmark data by the
-committed analysis scripts, each of which was run and inspected by the author.
-The author designed the experiments, verified the analyses and the cited
-literature, and takes full responsibility for the content of this manuscript.
+Claude (Anthropic), including Claude Code, was used for code authoring and
+refactoring and for drafting and copy-editing of the manuscript text;
+Perplexity (Perplexity AI) was used for literature search. These tools were not
+used to generate or alter any experimental measurement. Full details are given
+in Section 4.5. The author takes full responsibility for the content of this
+manuscript.
 
 ## References
 
@@ -1040,6 +1109,34 @@ literature, and takes full responsibility for the content of this manuscript.
 44. Uta, A., Custura, A., Duplyakin, D., Jimenez, I., Rellermeyer, J., Maltzahn, C., Ricci, R., and Iosup, A. (2020). Is Big Data Performance Reproducible in Modern Cloud Networks? *NSDI '20*, 513–527.
 45. van Hoorn, A., Waller, J., and Hasselbring, W. (2012). Kieker: A Framework for Application Performance Monitoring and Dynamic Software Analysis. *ICPE '12*, 247–248.
 46. xacrimon. DashMap: Blazingly Fast Concurrent Map in Rust. https://github.com/xacrimon/dashmap
+47. Kapoor, S. RustRedis: a Redis-compatible in-memory key-value server for measuring per-command observability overhead (Version v1.0-paper) [software and dataset]. Zenodo; 2026. doi:10.5281/zenodo.23295261
+
+---
+
+## Figure Legends
+
+**Figure 1.** Each design axis priced separately on the pooled D8s_v6 dataset.
+Bars are cluster-aware 95% CIs over the eleven runs.
+
+**Figure 2.** (a) Axis cost against client concurrency, 8 workers throughout,
+with cluster-aware 95% CIs; the point-to-point variation lies inside the noise
+band. (b) The same axes at 4 versus 8 worker threads at matched client load.
+
+**Figure 3.** Each strategy's cost at the median and at p99. Short dumbbells
+(high index) indicate cost that persists into the tail.
+
+**Figure 4.** Cost as the live entry count sweeps 3.5 decades with
+per-operation work held constant, shown two ways from the same data. (a) The
+paired difference against the 2-entry configuration — the quantity actually
+tested, and the intervals the resolved/unresolved verdict rests on. (b) Each
+configuration's absolute cost. Panel (b) is included because reading it alone
+invites a specific error: its intervals overlap between adjacent cardinalities,
+which resembles "no difference", but overlapping intervals are not a test of a
+difference. The two forms have broadly similar interval widths here; the paired
+comparison wins by removing the baseline instrumentation cost common to every
+cardinality, not by being tighter.
+
+---
 
 ## Appendix A. Reproducibility
 
@@ -1105,7 +1202,7 @@ The Python analysis code needs `numpy`, `pandas`, `scipy` and `matplotlib`;
 `requirements.txt` at the repository root pins the set that produced the
 committed numbers.
 
-## Appendix B. Axis arithmetic
+## Appendix B. Axis Arithmetic
 
 Because all four axes are differences against a common reference, any pairwise
 strategy comparison is recoverable without re-analysis. Writing `O(s)` for a

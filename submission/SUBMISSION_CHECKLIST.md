@@ -63,10 +63,10 @@ author can take (an account, a payment choice, a website form).
 - [ ] **Move the manuscript into the journal's LaTeX template.** For SPE that
       is Wiley's `wileyNJD-v2` class, downloaded from the journal's author
       guidelines page; for JSS it is Elsevier's `elsarticle`. The manuscript is
-      currently venue-neutral Markdown (`docs/final_paper_v27.md`) with a Word
-      export (`docs/final_paper_v28.docx`); SPE accepts an initial submission
-      as a single PDF, so the LaTeX conversion can be deferred to revision if
-      preferred. Use the vector PDFs in `docs/figures/` for the figures.
+      currently venue-neutral Markdown (`docs/final_paper_v27.md`); SPE accepts an
+      initial submission as a single PDF, so the LaTeX conversion can be
+      deferred to revision if preferred. Export a submission copy from the
+      Markdown when one is needed — no binary export is kept in the tree. Use the vector PDFs in `docs/figures/` for the figures.
 - [ ] **Choose the subscription (non-open-access) option** when the submission
       system asks, so no article-processing charge is incurred.
 - [ ] **Submit through the publisher's official site only**, and to one journal

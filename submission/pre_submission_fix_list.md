@@ -149,11 +149,11 @@ Section numbers (§2, §5.2 …) refer to `docs/final_paper_v27.md`.
       manuscript, the cover letter and `CITATION.cff`.
 - [ ] **Move the paper into the journal's LaTeX template.** *Author action —
       needs Wiley's `wileyNJD-v2` class from the journal's author-guidelines
-      page.* The manuscript is venue-neutral Markdown with a regenerated Word
-      export (`docs/final_paper_v28.docx`, rebuilt from the edited Markdown with
-      all four figures embedded); SPE accepts an initial submission as a single
-      PDF, so this can be deferred to revision. Use the vector PDFs in
-      `docs/figures/`.
+      page.* The manuscript is venue-neutral Markdown; the Word export used for
+      submission was generated from it with all four figures embedded and is not
+      kept in the tree (export a fresh copy when one is needed). SPE accepts an
+      initial submission as a single PDF, so this can be deferred to revision.
+      Use the vector PDFs in `docs/figures/`.
 - [x] **Add a data-availability statement.** New **Data Availability** section
       in the manuscript with the repository URL, the release tag and the DOI
       placeholder.

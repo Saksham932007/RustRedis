@@ -4,20 +4,24 @@
 
 RustRedis is an experimental Redis-compatible in-memory key-value server in Rust (~3,500
 LOC), built to answer one research question: **what does per-command observability
-instrumentation actually cost on a concurrent, network-bound server — and which design
-decision inside "instrumentation" is the expensive one?**
+instrumentation actually cost on a thread-pool concurrent server — and which design
+decision inside "instrumentation" is the expensive one?** (Client and server are
+co-located on one VM over loopback, so this is deliberately not a network-bound
+measurement; see [Caveats](#caveats).)
 
 ## TL;DR
 
-Eight interchangeable per-command metrics collectors are chosen so that adjacent pairs
+Six interchangeable per-command metrics collectors are chosen so that adjacent pairs
 differ along **exactly one design axis** — synchronization discipline, metric key
 cardinality, aggregation locality, per-sample payload — which turns a strategy ranking
-into a **factorial decomposition**. Measurement uses Randomized Multiple Interleaved
+into a **factorial decomposition**. (Two further collectors were added for the
+axis-separation experiment, eight in the tree.) Measurement uses Randomized Multiple Interleaved
 Trials (RMIT; Abedi, Heard & Brecht 2015, shown necessary for clouds by
 [Abedi & Brecht, ICPE 2017](docs/final_paper_v27.md#2-background-and-related-work) — not
 invented here), replicated across independently provisioned Azure VMs with all intervals
 **clustered on runs, not blocks**: **29,520 benchmark runs** (25,200 main design +
-4,320 axis-separation), 100–3000 concurrent clients, three read/write mixes.
+4,320 axis-separation) over **fourteen dedicated cloud VMs**, 100–3000 concurrent
+clients, three read/write mixes.
 
 Four findings:
 
@@ -26,7 +30,9 @@ Four findings:
    more** than the 0.52 pp that replacing a global mutex with a 64-way sharded map
    *saves* (gap 0.34 pp, 95% CI [0.19, 0.50], 10/11 runs, sign p = 0.012). A sharded
    "scalable" map with a high-cardinality label is measurably **slower** than one global
-   lock with a low-cardinality one. 4.5× at 4 workers, 1.66× at 8.
+   lock with a low-cardinality one. 4.5× at 4 workers and 1.66× at 8 — or 4.51× and
+   1.58× once the two worker counts are matched on workload and client load, which is
+   the comparison to use when pairing them (§5.2).
 2. **The axes obey different scaling laws.** Over a **30× client-concurrency range no
    axis moves** (largest slope 0.041 pp/doubling, CI spans zero) even though the server
    is genuinely saturated (p99 0.76 ms → 78.9 ms). The synchronization axis tracks
@@ -121,8 +127,7 @@ with directional claims cross-checked by an exact sign test.
 | Sharded-N | 1.71 [1.58, 1.84] | 1.85 [1.70, 1.99] | 2.19 [2.01, 2.36] | 0.83 [0.60, 1.07] |
 
 The *ranking itself depends on the metric*: HdrHistogram is rank 4 on throughput, rank 3
-at p50, rank 5 at p99. ThreadLocal is cheapest under every metric; the ranking is also
-stable across all three workload mixes (50/50, 80/20 read-heavy, 20/80 write-heavy).
+at p50, rank 5 at p99. ThreadLocal is cheapest under every metric.
 
 ### Scaling (axes, pp per doubling of clients, fitted within run)
 
@@ -138,9 +143,9 @@ clients → 259,932 ops/s @ p99 78.85 ms at 3000 (p99 ×104, throughput −10.5%
 saturation, no cliff — and telemetry cost simply does not participate. At matched client
 load, 4 → 8 workers moves **SYNC 2.60×** and DEFER 1.39×, while PAYLOAD (0.94×) and CARD
 (0.92×) do not move. Because SYNC grows with parallelism and CARD does not, their ratio
-must close — naive extrapolation puts a crossover near 11–16 workers, but that is a
-hypothesis from two worker-count points, not a fitted law; present claims are bounded to
-4–8 cores.
+must close — extrapolating the matched SYNC trend puts a crossover at about 11 workers
+(about 12 if SYNC is instead fitted linearly in worker count), but that is a hypothesis
+from two worker-count points, not a fitted law; present claims are bounded to 4–8 cores.
 
 ### Rigidity (tail-concentration index = p99 cost ÷ p50 cost)
 
@@ -231,6 +236,11 @@ for reading a small dry run's raw output.
   thread-oversubscription stress test, not an isolated server measurement.
 - Only 4 and 8 vCPU/worker counts tested — no claim about other architectures or core
   counts, including the extrapolated SYNC/CARD crossover.
+- A logging bug recorded a placeholder processor string in the D4s_v6 run's metadata, so
+  while all eleven D8s_v6 runs verifiably share one CPU model (Intel Xeon Platinum
+  8573C), the artifact cannot confirm the 4-vCPU VM used the same microarchitecture.
+- The ~10³-entry threshold of finding 4 is measured with one instrument on one server and
+  may be a property of this DashMap configuration rather than of the class.
 - The HDR-merge mechanism for rigidity is interpretation, not direct measurement.
 
 ## Quick start
@@ -304,8 +314,8 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
 ## Documentation
 
 - [docs/final_paper_v27.md](docs/final_paper_v27.md) — **"Cardinality Before
-  Contention"**, the manuscript (also available as `final_paper_v28.docx`). Every table,
-  figure and quoted statistic regenerates from committed artifacts; see its Appendix A.
+  Contention"**, the manuscript. Every table, figure and quoted statistic
+  regenerates from committed artifacts; see its Appendix A.
 - [docs/README.md](docs/README.md) — index of the documentation.
 - [submission/](submission) — cover letter and pre-submission checklist.
 - [archive/](archive) — superseded working material, including an earlier

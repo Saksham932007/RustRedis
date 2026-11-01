@@ -18,9 +18,10 @@ Highly Variable Cloud Computing Environments," ICPE 2017, not invented for
 this project — fixes this: every repetition executes all (strategy,
 concurrency) pairs in a fresh random order, so time-varying machine state
 is spread evenly across strategies instead of confounded with them. See
-`archive/paper_draft.md` §1 for the full related-work comparison, including
-Laaber et al. (2019), who apply the same technique to cloud
-microbenchmarking.
+[`final_paper_v27.md`](final_paper_v27.md) §2 for the full related-work
+comparison, including Laaber et al. (2019), who apply the same technique to
+cloud microbenchmarking, and [`related_work_notes.md`](related_work_notes.md)
+for the working annotations behind it.
 
 ## Runner
 
@@ -143,3 +144,45 @@ level. **Before trusting a run at concurrency above ~1000, check
 `ulimit -Hn` on the machine (or container) it'll run on**, and look at a
 1-repetition dry run's per-run throughput numbers by eye — a suspiciously
 *clean*, *uniform* zero across many runs is this failure mode, not noise.
+
+## Replicating across independent VMs, and pooling
+
+The manuscript's main dataset is not one run. It is **eleven independent runs**
+on five separately provisioned `Standard_D8s_v6` VMs across three regions: the
+`run_00` validation run above on its own Central India VM, then `run_01`–`run_10`
+distributed over two further Central India VMs, one South India VM and one West
+US 3 VM, each with a distinct random seed. All eleven report the same processor
+(Intel Xeon Platinum 8573C), so the pool varies in instance, region and date but
+not microarchitecture. With the D4s_v6 run and the eight follow-up VMs of §5.4,
+that is **fourteen VMs and 29,520 runs** in total (25,200 main design + 4,320
+axis-separation).
+
+Each of `run_01`–`run_10` is one VM, provisioned and torn down as above:
+
+```bash
+for i in $(seq -w 1 10); do
+  RMIT_ENVIRONMENT_LABEL=<label-$i> python3 scripts/run_rmit_experiment.py \
+    --runs 15 --concurrency 100,250,500,750,1000,1500,2000,3000 \
+    --workloads mixed,read-heavy,write-heavy --seed $((1000 + 10#$i)) \
+    --output-dir experiments/azure_d8s_v6/run_$(printf %02d $i)
+done
+```
+
+Then pool them. `combine_iterations.py` offsets each run's `block_id` so that a
+paired within-block comparison can never mix blocks from different VMs:
+
+```bash
+python3 scripts/combine_iterations.py
+```
+
+**Pool, then cluster the inference on runs.** The 165 blocks per cell in the
+pooled dataset are 11 independent runs × 15 correlated within-run blocks, not
+165 independent samples — blocks from one run share that VM's hardware,
+neighbours and network path, and treating them as independent overstates
+precision by roughly 20% on this data. `scripts/analyze_design_axes.py`
+therefore collapses each run to one mean and forms a *t*-interval with 10
+degrees of freedom over those eleven numbers, cross-checking directional claims
+with an exact two-sided sign test. The single-run D4s_v6 dataset has no
+run-level replication, so its intervals bootstrap over that run's 30 repetition
+blocks (20,000 resamples) and are not comparable in strength to the pooled ones.
+See [`final_paper_v27.md`](final_paper_v27.md) §4.2–§4.3 and Appendix A.
