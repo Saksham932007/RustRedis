@@ -3,6 +3,7 @@
 //! This module provides interchangeable collectors to measure how telemetry design
 //! impacts server performance under load.
 
+use crate::sync::LockExt;
 use dashmap::DashMap;
 use hdrhistogram::Histogram;
 use std::collections::HashMap;
@@ -182,7 +183,7 @@ impl GlobalMutexCollector {
 
     fn record(&self, cmd_name: &'static str, duration_us: u64) {
         let wait_start = Instant::now();
-        let mut map = self.data.lock().unwrap();
+        let mut map = self.data.lock_recover();
         let wait_us = wait_start.elapsed().as_micros() as u64;
         self.lock_wait_us.fetch_add(wait_us, Ordering::Relaxed);
 
@@ -192,7 +193,7 @@ impl GlobalMutexCollector {
     }
 
     fn snapshot(&self) -> Vec<(&'static str, CommandStat)> {
-        let map = self.data.lock().unwrap();
+        let map = self.data.lock_recover();
         map.iter().map(|(k, v)| (*k, v.clone())).collect()
     }
 
@@ -443,16 +444,14 @@ impl ThreadLocalBatchedCollector {
             let mut local = tls.borrow_mut();
             if !local.is_empty() {
                 let batch = std::mem::take(&mut *local);
-                if let Ok(mut pending) = self.pending_batches.lock() {
-                    pending.push(batch);
-                }
+                self.pending_batches.lock_recover().push(batch);
             }
         });
     }
 
     fn flush(&self) {
         let batches: Vec<HashMap<&'static str, CommandStat>> = {
-            let mut pending = self.pending_batches.lock().unwrap();
+            let mut pending = self.pending_batches.lock_recover();
             std::mem::take(&mut *pending)
         };
 
@@ -462,7 +461,7 @@ impl ThreadLocalBatchedCollector {
 
         self.flush_with_batches.fetch_add(1, Ordering::Relaxed);
 
-        let mut snapshot = self.global_snapshot.lock().unwrap();
+        let mut snapshot = self.global_snapshot.lock_recover();
         for batch in batches {
             for (cmd, stat) in batch {
                 snapshot
@@ -480,7 +479,7 @@ impl ThreadLocalBatchedCollector {
         self.push_local_batch();
         self.flush();
 
-        let snapshot = self.global_snapshot.lock().unwrap();
+        let snapshot = self.global_snapshot.lock_recover();
         snapshot.iter().map(|(k, v)| (*k, v.clone())).collect()
     }
 
@@ -565,9 +564,7 @@ impl ThreadLocalOwnedCollector {
             let mut local = tls.borrow_mut();
             if !local.is_empty() {
                 let batch = std::mem::take(&mut *local);
-                if let Ok(mut pending) = self.pending_batches.lock() {
-                    pending.push(batch);
-                }
+                self.pending_batches.lock_recover().push(batch);
             }
         });
     }
@@ -583,7 +580,7 @@ impl ThreadLocalOwnedCollector {
         }
 
         let batches: Vec<HashMap<String, CommandStat>> = {
-            let mut pending = self.pending_batches.lock().unwrap();
+            let mut pending = self.pending_batches.lock_recover();
             std::mem::take(&mut *pending)
         };
 
@@ -594,7 +591,7 @@ impl ThreadLocalOwnedCollector {
 
         self.phase_swaps.fetch_add(1, Ordering::Relaxed);
 
-        let mut snapshot = self.global_snapshot.lock().unwrap();
+        let mut snapshot = self.global_snapshot.lock_recover();
         for batch in batches {
             for (metric_key, stat) in batch {
                 snapshot
@@ -613,7 +610,7 @@ impl ThreadLocalOwnedCollector {
         self.push_local_batch();
         self.flush();
 
-        let snapshot = self.global_snapshot.lock().unwrap();
+        let snapshot = self.global_snapshot.lock_recover();
         snapshot
             .iter()
             .map(|(key, stat)| (key.clone(), stat.clone()))
@@ -758,9 +755,7 @@ impl HdrHistogramCollector {
             let mut local = tls.borrow_mut();
             if !local.is_empty() {
                 let batch = std::mem::take(&mut *local);
-                if let Ok(mut pending) = self.pending_batches.lock() {
-                    pending.push(batch);
-                }
+                self.pending_batches.lock_recover().push(batch);
             }
         });
     }
@@ -776,7 +771,7 @@ impl HdrHistogramCollector {
         }
 
         let batches: Vec<HashMap<String, HdrThreadStat>> = {
-            let mut pending = self.pending_batches.lock().unwrap();
+            let mut pending = self.pending_batches.lock_recover();
             std::mem::take(&mut *pending)
         };
 
@@ -787,7 +782,7 @@ impl HdrHistogramCollector {
 
         self.phase_swaps.fetch_add(1, Ordering::Relaxed);
 
-        let mut snapshot = self.global_snapshot.lock().unwrap();
+        let mut snapshot = self.global_snapshot.lock_recover();
         for batch in batches {
             for (metric_key, stat) in batch {
                 snapshot
@@ -806,7 +801,7 @@ impl HdrHistogramCollector {
         self.push_local_batch();
         self.flush();
 
-        let snapshot = self.global_snapshot.lock().unwrap();
+        let snapshot = self.global_snapshot.lock_recover();
         snapshot
             .iter()
             .map(|(key, stat)| (key.clone(), stat.as_command_stat()))
