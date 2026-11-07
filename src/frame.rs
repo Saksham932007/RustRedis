@@ -63,7 +63,8 @@ pub enum Frame {
     Integer(i64),
 
     /// Bulk string: $5\r\nhello\r\n
-    /// Uses Bytes for zero-copy operations
+    /// The payload is copied out of the read buffer when the frame is parsed;
+    /// `Bytes` makes later clones cheap.
     Bulk(Bytes),
 
     /// Array of frames: *2\r\n$3\r\nGET\r\n$3\r\nkey\r\n
