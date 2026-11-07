@@ -213,7 +213,13 @@ impl Command {
                                     )
                                 }
                             };
-                            expires_at = Some(Instant::now() + Duration::from_secs(seconds));
+                            if seconds == 0 {
+                                return Err("ERR invalid expire time in 'set' command".to_string());
+                            }
+                            expires_at = Instant::now()
+                                .checked_add(Duration::from_secs(seconds))
+                                .ok_or("ERR invalid expire time in 'set' command")
+                                .map(Some)?;
                             i += 2;
                         }
                         _ => return Err(format!("ERR syntax error near '{}'", option)),
@@ -1156,3 +1162,6 @@ impl Command {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
