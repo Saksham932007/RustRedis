@@ -132,6 +132,15 @@ def parse_args() -> argparse.Namespace:
              "unless sharded_bucketed is among the selected strategies. Note the "
              "achieved entry count is capped by --key-space (see docs).",
     )
+    p.add_argument(
+        "--store",
+        choices=["mutex", "dashmap"],
+        default="mutex",
+        help="Keyspace backend the server runs on (RUSTREDIS_STORE). 'mutex' is the "
+             "original single-mutex store used for the published results; 'dashmap' is "
+             "the sharded store, used to check that keyspace lock contention does not "
+             "confound the metrics-collector comparison.",
+    )
     p.add_argument("--inter-run-cooldown-secs", type=float, default=2.0)
     p.add_argument("--run-retry-limit", type=int, default=3)
     p.add_argument("--port", type=int, default=6379)
@@ -297,11 +306,13 @@ def start_server(
     port: int,
     timeout_secs: int,
     log_path: Path,
+    store: str = "mutex",
 ) -> Tuple[subprocess.Popen, object]:
     env = os.environ.copy()
     env["TOKIO_WORKER_THREADS"] = str(worker_threads)
     env["RUSTREDIS_METRICS_STRATEGY"] = strategy.env_value
     env["RUSTREDIS_DISABLE_AOF"] = "1"
+    env["RUSTREDIS_STORE"] = store
     if strategy.cardinality is not None:
         env["RUSTREDIS_METRICS_CARDINALITY"] = str(strategy.cardinality)
 
@@ -562,6 +573,7 @@ def main() -> None:
                     port=args.port,
                     timeout_secs=args.server_startup_timeout_secs,
                     log_path=cfg_dir / "server.log",
+                    store=args.store,
                 )
 
                 row: Optional[Dict[str, object]] = None
@@ -644,6 +656,7 @@ def main() -> None:
             "key_space": args.key_space,
             "value_size": args.value_size,
             "seed": args.seed,
+            "store": args.store,
         },
     }
     (output_dir / "metadata_rmit.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
