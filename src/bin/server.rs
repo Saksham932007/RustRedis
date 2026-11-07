@@ -216,6 +216,7 @@ async fn handle_connection<S: Store>(
                 warn!("Protocol error: {}", e);
                 let reply = Frame::error(format!("ERR Protocol error: {}", e));
                 let _ = connection.write_frame(&reply).await;
+                let _ = connection.flush().await;
                 return Ok(());
             }
             Err(e) => return Err(e.into()),

@@ -57,6 +57,11 @@ impl Connection {
                 ));
             }
 
+            // About to wait for the client: send everything queued so far. When
+            // the client pipelines several commands this flushes once per batch
+            // rather than once per response.
+            self.flush().await?;
+
             // Not enough data, read more from the socket
             let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
 
@@ -84,15 +89,18 @@ impl Connection {
         }
     }
 
-    /// Write a frame to the connection
+    /// Queue a frame for sending
+    ///
+    /// The frame is buffered; it is sent when the buffer fills, when
+    /// `read_frame` is about to wait for more input, or on an explicit
+    /// `flush`.
     pub async fn write_frame(&mut self, frame: &Frame) -> Result<(), io::Error> {
-        // Serialize the frame to the writer
-        self.write_value(frame).await?;
+        self.write_value(frame).await
+    }
 
-        // Flush the buffer to ensure data is sent
-        self.stream.flush().await?;
-
-        Ok(())
+    /// Send all buffered frames to the peer
+    pub async fn flush(&mut self) -> Result<(), io::Error> {
+        self.stream.flush().await
     }
 
     /// Serialize a frame value to the writer
@@ -162,6 +170,43 @@ mod tests {
         let (mut conn, mut client) = pair(1024).await;
         client.write_all(b"+PONG\r\n").await.unwrap();
         assert_eq!(conn.read_frame().await.unwrap(), Some(Frame::simple("PONG")));
+    }
+
+    #[tokio::test]
+    async fn write_frame_is_buffered_until_flush() {
+        use tokio::io::AsyncReadExt;
+        use tokio::time::{timeout, Duration};
+
+        let (mut conn, mut client) = pair(1024).await;
+        conn.write_frame(&Frame::simple("A")).await.unwrap();
+        conn.write_frame(&Frame::simple("B")).await.unwrap();
+
+        let mut buf = [0u8; 16];
+        assert!(timeout(Duration::from_millis(100), client.read(&mut buf))
+            .await
+            .is_err());
+
+        conn.flush().await.unwrap();
+        let n = client.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"+A\r\n+B\r\n");
+    }
+
+    #[tokio::test]
+    async fn read_frame_flushes_pending_responses_before_waiting() {
+        use tokio::io::AsyncReadExt;
+
+        let (mut conn, mut client) = pair(1024).await;
+        conn.write_frame(&Frame::simple("OK")).await.unwrap();
+        client.write_all(b"+X\r\n").await.unwrap();
+        assert_eq!(conn.read_frame().await.unwrap(), Some(Frame::simple("X")));
+
+        // The first read found a complete frame already buffered or read it
+        // after flushing; either way a second read must flush the response.
+        client.write_all(b"+Y\r\n").await.unwrap();
+        assert_eq!(conn.read_frame().await.unwrap(), Some(Frame::simple("Y")));
+        let mut buf = [0u8; 8];
+        let n = client.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"+OK\r\n");
     }
 
     #[tokio::test]
