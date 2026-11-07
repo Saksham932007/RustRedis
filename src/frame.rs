@@ -139,27 +139,25 @@ fn check_complete(cursor: &mut Cursor<&[u8]>) -> Result<(), Error> {
         b':' => read_until_crlf(cursor), // Integer
         b'$' => {
             // Bulk String
-            let len = read_decimal(cursor)?;
-            if len == -1 {
+            match read_length(cursor, "bulk")? {
                 // Null bulk string
-                Ok(())
-            } else {
+                None => Ok(()),
                 // Skip len bytes + \r\n
-                skip(cursor, len as usize + 2)
+                Some(len) => skip(cursor, len.saturating_add(2)),
             }
         }
         b'*' => {
             // Array
-            let count = read_decimal(cursor)?;
-            if count == -1 {
+            match read_length(cursor, "array")? {
                 // Null array (not standard but handle it)
-                Ok(())
-            } else {
+                None => Ok(()),
                 // Recursively check each element
-                for _ in 0..count {
-                    check_complete(cursor)?;
+                Some(count) => {
+                    for _ in 0..count {
+                        check_complete(cursor)?;
+                    }
+                    Ok(())
                 }
-                Ok(())
             }
         }
         actual => Err(Error::Invalid(format!(
@@ -188,28 +186,24 @@ fn parse_frame(cursor: &mut Cursor<&[u8]>) -> Result<Frame, Error> {
             let num = read_decimal(cursor)?;
             Ok(Frame::Integer(num))
         }
-        b'$' => {
-            let len = read_decimal(cursor)?;
-            if len == -1 {
-                Ok(Frame::Null)
-            } else {
-                let data = read_n_bytes(cursor, len as usize)?;
+        b'$' => match read_length(cursor, "bulk")? {
+            None => Ok(Frame::Null),
+            Some(len) => {
+                let data = read_n_bytes(cursor, len)?;
                 skip(cursor, 2)?; // Skip \r\n
                 Ok(Frame::Bulk(Bytes::copy_from_slice(data)))
             }
-        }
-        b'*' => {
-            let count = read_decimal(cursor)?;
-            if count == -1 {
-                Ok(Frame::Null)
-            } else {
-                let mut frames = Vec::with_capacity(count as usize);
+        },
+        b'*' => match read_length(cursor, "array")? {
+            None => Ok(Frame::Null),
+            Some(count) => {
+                let mut frames = Vec::with_capacity(count);
                 for _ in 0..count {
                     frames.push(parse_frame(cursor)?);
                 }
                 Ok(Frame::Array(frames))
             }
-        }
+        },
         _ => Err(Error::Invalid("invalid frame type".to_string())),
     }
 }
@@ -263,10 +257,23 @@ fn read_decimal(cursor: &mut Cursor<&[u8]>) -> Result<i64, Error> {
         .map_err(|_| Error::Invalid(format!("invalid decimal: {}", string)))
 }
 
+/// Read a length prefix. `-1` means null and yields `None`; any other
+/// negative value is a protocol error.
+fn read_length(cursor: &mut Cursor<&[u8]>, what: &str) -> Result<Option<usize>, Error> {
+    match read_decimal(cursor)? {
+        -1 => Ok(None),
+        n => usize::try_from(n)
+            .map(Some)
+            .map_err(|_| Error::Invalid(format!("invalid {} length: {}", what, n))),
+    }
+}
+
 /// Read exactly n bytes
 fn read_n_bytes<'a>(cursor: &mut Cursor<&'a [u8]>, n: usize) -> Result<&'a [u8], Error> {
     let start = cursor.position() as usize;
-    let end = start + n;
+    let end = start
+        .checked_add(n)
+        .ok_or_else(|| Error::Invalid("length overflow".to_string()))?;
 
     if end > cursor.get_ref().len() {
         return Err(Error::Incomplete);
@@ -278,7 +285,9 @@ fn read_n_bytes<'a>(cursor: &mut Cursor<&'a [u8]>, n: usize) -> Result<&'a [u8],
 
 /// Skip n bytes
 fn skip(cursor: &mut Cursor<&[u8]>, n: usize) -> Result<(), Error> {
-    let new_pos = cursor.position() as usize + n;
+    let new_pos = (cursor.position() as usize)
+        .checked_add(n)
+        .ok_or_else(|| Error::Invalid("length overflow".to_string()))?;
 
     if new_pos > cursor.get_ref().len() {
         return Err(Error::Incomplete);
@@ -413,6 +422,32 @@ mod tests {
     #[test]
     fn invalid_type_byte_is_rejected() {
         assert!(matches!(parse(b"?foo\r\n"), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn negative_array_count_below_minus_one_is_rejected() {
+        assert!(matches!(parse(b"*-5\r\n"), Err(Error::Invalid(_))));
+        assert!(matches!(parse(b"*-2\r\n"), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn negative_bulk_length_below_minus_one_is_rejected() {
+        assert!(matches!(parse(b"$-5\r\n"), Err(Error::Invalid(_))));
+        assert!(matches!(
+            parse(b"$-9223372036854775808\r\n"),
+            Err(Error::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn length_near_usize_max_does_not_overflow() {
+        assert!(parse(b"$9223372036854775807\r\n").is_ok());
+        assert!(parse(b"*9223372036854775807\r\n").is_ok());
+    }
+
+    #[test]
+    fn null_array_is_accepted() {
+        assert_eq!(parse(b"*-1\r\n").unwrap(), Some(Frame::Null));
     }
 
     #[test]
