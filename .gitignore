@@ -12,3 +12,6 @@ appendonly.aof*
 experiments/**/run_data/
 experiments/output/
 hardware_diag.csv
+/fuzz/target
+/fuzz/artifacts
+/fuzz/corpus

@@ -1,0 +1,25 @@
+[package]
+name = "rust-redis-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bytes = "1"
+
+[dependencies.rust-redis]
+path = ".."
+
+# Keep the fuzz crate out of the main workspace
+[workspace]
+
+[[bin]]
+name = "parse_frame"
+path = "fuzz_targets/parse_frame.rs"
+test = false
+doc = false
+bench = false
