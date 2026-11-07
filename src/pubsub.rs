@@ -1,3 +1,4 @@
+use crate::sync::LockExt;
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -33,7 +34,7 @@ impl PubSub {
     ///
     /// Returns the number of subscribers that received the message
     pub fn publish(&self, channel: &str, message: Bytes) -> usize {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         if let Some(sender) = state.channels.get(channel) {
             // Send to all subscribers
@@ -52,7 +53,7 @@ impl PubSub {
     ///
     /// Returns a receiver that will get all messages published to the channel
     pub fn subscribe(&self, channel: String) -> broadcast::Receiver<Bytes> {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         // Get or create the channel
         let sender = state
@@ -65,7 +66,7 @@ impl PubSub {
 
     /// Get the number of subscribers for a channel
     pub fn num_subscribers(&self, channel: &str) -> usize {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         state
             .channels
@@ -76,13 +77,13 @@ impl PubSub {
 
     /// Get the number of active channels
     pub fn num_channels(&self) -> usize {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
         state.channels.len()
     }
 
     /// Clean up empty channels (channels with no subscribers)
     pub fn cleanup_empty_channels(&self) {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         // Remove channels with no subscribers
         state
