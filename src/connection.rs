@@ -1,8 +1,12 @@
-use crate::frame::{Error as FrameError, Frame};
+use crate::frame::{Error as FrameError, Frame, MAX_BULK_LEN};
 use bytes::BytesMut;
 use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
+
+/// Default ceiling for unparsed bytes buffered per connection: the largest
+/// legal bulk string plus room for its header and framing.
+pub const DEFAULT_MAX_BUFFER: usize = MAX_BULK_LEN + 1024 * 1024;
 
 /// Connection wrapper around a TcpStream that handles buffered reading/writing
 /// and frame parsing/serialization
@@ -12,14 +16,24 @@ pub struct Connection {
 
     /// Read buffer for incoming data
     buffer: BytesMut,
+
+    /// Maximum number of unparsed bytes to buffer before giving up on the peer
+    max_buffer: usize,
 }
 
 impl Connection {
     /// Create a new Connection from a TcpStream
     pub fn new(socket: TcpStream) -> Connection {
+        Connection::with_max_buffer(socket, DEFAULT_MAX_BUFFER)
+    }
+
+    /// Create a Connection that refuses to buffer more than `max_buffer`
+    /// unparsed bytes from the peer
+    pub fn with_max_buffer(socket: TcpStream, max_buffer: usize) -> Connection {
         Connection {
             stream: BufWriter::new(socket),
             buffer: BytesMut::with_capacity(4096),
+            max_buffer,
         }
     }
 
@@ -33,6 +47,14 @@ impl Connection {
             // Try to parse a frame from the buffer
             if let Some(frame) = self.parse_frame()? {
                 return Ok(Some(frame));
+            }
+
+            // A peer that never completes a frame must not grow the buffer forever
+            if self.buffer.len() > self.max_buffer {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "request exceeds maximum buffer size",
+                ));
             }
 
             // Not enough data, read more from the socket
@@ -118,5 +140,43 @@ impl Connection {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    /// Returns a server-side Connection and the client socket talking to it
+    async fn pair(max_buffer: usize) -> (Connection, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (client, accepted) = tokio::join!(TcpStream::connect(addr), listener.accept());
+        let (socket, _) = accepted.unwrap();
+        (Connection::with_max_buffer(socket, max_buffer), client.unwrap())
+    }
+
+    #[tokio::test]
+    async fn reads_a_frame() {
+        let (mut conn, mut client) = pair(1024).await;
+        client.write_all(b"+PONG\r\n").await.unwrap();
+        assert_eq!(conn.read_frame().await.unwrap(), Some(Frame::simple("PONG")));
+    }
+
+    #[tokio::test]
+    async fn input_without_a_terminator_hits_the_buffer_limit() {
+        let (mut conn, mut client) = pair(1024).await;
+        client.write_all(&[b'A'; 4096]).await.unwrap();
+        let err = conn.read_frame().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn invalid_frame_is_an_invalid_data_error() {
+        let (mut conn, mut client) = pair(1024).await;
+        client.write_all(b"*-5\r\n").await.unwrap();
+        let err = conn.read_frame().await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 }

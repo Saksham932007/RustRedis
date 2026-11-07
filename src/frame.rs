@@ -6,7 +6,7 @@ use std::io::{self, Cursor};
 const MAX_DEPTH: usize = 128;
 
 /// Maximum bulk string length (512 MB, Redis' `proto-max-bulk-len` default).
-const MAX_BULK_LEN: usize = 512 * 1024 * 1024;
+pub const MAX_BULK_LEN: usize = 512 * 1024 * 1024;
 
 /// Maximum number of elements in an array (Redis' multibulk limit).
 const MAX_ARRAY_LEN: usize = 1024 * 1024;
