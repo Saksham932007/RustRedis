@@ -4,10 +4,12 @@ use rust_redis::{
     command_metrics::{self, CommandMetricsCollector, MetricsStrategy, SharedCommandMetrics},
     connection::Connection,
     db::Db,
+    db_dashmap::DbDashMap,
     frame::Frame,
     metrics::{Metrics, SharedMetrics},
     persistence::{Aof, AofSyncPolicy},
     pubsub::PubSub,
+    store::Store,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -24,8 +26,27 @@ async fn main() -> Result<()> {
         .with_level(true)
         .init();
 
+    // Select the keyspace backend. The single-mutex store is the default so that
+    // published results stay reproducible; the sharded store exists to test
+    // whether keyspace lock contention confounds the metrics comparison.
+    let store = std::env::var("RUSTREDIS_STORE").unwrap_or_else(|_| "mutex".to_string());
+    match store.to_ascii_lowercase().as_str() {
+        "mutex" => {
+            info!("Keyspace store: mutex");
+            serve::<Db>().await
+        }
+        "dashmap" => {
+            info!("Keyspace store: dashmap");
+            serve::<DbDashMap>().await
+        }
+        other => anyhow::bail!("unknown RUSTREDIS_STORE '{}' (expected 'mutex' or 'dashmap')", other),
+    }
+}
+
+/// Run the server on the given keyspace backend
+async fn serve<S: Store>() -> Result<()> {
     // Create the shared database
-    let db = Db::new();
+    let db = S::new();
 
     // Create Pub/Sub manager
     let pubsub = PubSub::new();
@@ -167,9 +188,9 @@ async fn main() -> Result<()> {
 }
 
 /// Handle a single client connection
-async fn handle_connection(
+async fn handle_connection<S: Store>(
     socket: TcpStream,
-    db: Db,
+    db: S,
     aof: Option<Arc<Aof>>,
     pubsub: PubSub,
     metrics: SharedMetrics,
