@@ -21,7 +21,7 @@ what was changed, and what is still open. It is written to be checked, not admir
 | No CI | Fixed | `.github/workflows/ci.yml`: rustfmt, clippy `-D warnings`, tests |
 | Parser never fuzzed | Done | `fuzz/`, see below |
 | 15 MB of CSV in git | Fixed | Fetched from Zenodo by `scripts/fetch_data.sh` |
-| README too long before `cargo run` | Fixed | README leads with how to run it; results moved to `docs/RESULTS.md` |
+| README long before `cargo run` | Addressed | Full results kept for readers of the paper; a "Run it" section with the environment variables and a CI badge were added |
 | Unknown strategy names silently defaulted | Fixed | `MetricsStrategy::parse` is strict in the server |
 | Protocol and command errors silently dropped | Fixed | The server replies `-ERR ...` |
 
