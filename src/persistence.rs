@@ -1,3 +1,4 @@
+use crate::sync::LockExt;
 use crate::frame::Frame;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
@@ -42,7 +43,7 @@ impl Aof {
     ///
     /// Serializes the frame and writes it to the file
     pub fn append(&self, frame: &Frame) -> io::Result<()> {
-        let mut file = self.file.lock().unwrap();
+        let mut file = self.file.lock_recover();
 
         // Serialize the frame as RESP
         let serialized = Self::serialize_frame(frame);
@@ -66,9 +67,8 @@ impl Aof {
             let mut interval = time::interval(Duration::from_secs(1));
             loop {
                 interval.tick().await;
-                if let Ok(file) = self.file.lock() {
-                    let _ = file.sync_all();
-                }
+                let file = self.file.lock_recover();
+                let _ = file.sync_all();
             }
         });
     }
