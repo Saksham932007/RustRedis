@@ -770,24 +770,19 @@ async fn main() {
         }
 
         println!();
-        println!("  ┌─── Metrics Strategy Comparison Guide ────────────────────┐");
-        println!("  │ To compare strategies, run this benchmark 4 times:      │");
-        println!("  │                                                         │");
-        println!("  │ 1. RUSTREDIS_METRICS_STRATEGY=disabled                  │");
-        println!("  │    cargo run --release --bin server                      │");
-        println!("  │    cargo run --release -- --metrics-strategy disabled    │");
-        println!("  │                                                         │");
-        println!("  │ 2. RUSTREDIS_METRICS_STRATEGY=global_mutex              │");
-        println!("  │    (repeat server + benchmark)                          │");
-        println!("  │                                                         │");
-        println!("  │ 3. RUSTREDIS_METRICS_STRATEGY=sharded                   │");
-        println!("  │    (repeat server + benchmark)                          │");
-        println!("  │                                                         │");
-        println!("  │ 4. RUSTREDIS_METRICS_STRATEGY=thread_local              │");
-        println!("  │    (repeat server + benchmark)                          │");
-        println!("  │                                                         │");
-        println!("  │ Compare ops/sec and p99 across runs to measure overhead │");
-        println!("  └─────────────────────────────────────────────────────────┘");
+        println!("  Metrics strategy comparison guide");
+        println!("  Run this benchmark once per strategy, restarting the server each time:");
+        println!();
+        println!("    RUSTREDIS_METRICS_STRATEGY=<strategy> cargo run --release --bin server");
+        println!("    cargo run --release -p rustredis-bench -- --metrics-strategy <strategy>");
+        println!();
+        println!("  Strategies: disabled, global_mutex, sharded_2key, sharded_n,");
+        println!("              sharded_bucketed, thread_local, thread_local_owned, hdr_histogram");
+        println!();
+        println!("  To check that keyspace lock contention is not confounding the comparison,");
+        println!("  repeat with RUSTREDIS_STORE=dashmap (default: mutex).");
+        println!();
+        println!("  Compare ops/sec and p99 across runs to measure overhead.");
     }
 }
 
