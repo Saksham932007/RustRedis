@@ -15,3 +15,7 @@ hardware_diag.csv
 /fuzz/target
 /fuzz/artifacts
 /fuzz/corpus
+
+# Full datasets are fetched from Zenodo by scripts/fetch_data.sh, not committed
+experiments/azure_d8s_v6/**/*.csv
+experiments/azure_d8s_v6_followup/**/*.csv

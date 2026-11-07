@@ -58,8 +58,9 @@ Interleaved Trials (Abedi, Heard & Brecht 2015), not invented here.
 ## Reproducing the paper
 
 ```bash
-# 0. Analysis dependencies (Python 3.10+)
+# 0. Analysis dependencies (Python 3.10+) and the full datasets from Zenodo
 python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+scripts/fetch_data.sh    # downloads ~7 MB, verifies its checksum, fills experiments/
 
 # 1. Build
 cargo build --release --bin server
@@ -81,8 +82,7 @@ python3 scripts/analyze_design_axes.py              # -> experiments/design_axes
 python3 scripts/generate_design_axes_figures.py     # -> docs/figures/*.{png,pdf}
 ```
 
-The analysis commands run against the committed data as-is: they need no cloud
-VM and regenerate every table, figure and quoted statistic in the paper. Their
+After `scripts/fetch_data.sh`, the analysis commands need no cloud VM and regenerate every table, figure and quoted statistic in the paper. Their
 outputs are byte-identical on re-run, so a successful reproduction from a fresh
 clone leaves `git status` clean.
 
@@ -111,7 +111,7 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
 ├── src/                       Server (Rust): commands, storage backends, metrics collectors
 ├── benchmarks/                Load-generator crate (rustredis-bench)
 ├── scripts/                   Experiment runner, analysis, pooling, figures
-├── experiments/               Azure VM datasets (raw CSV + analysis JSON)
+├── experiments/               Analysis JSON, one sample run; full raw CSVs via scripts/fetch_data.sh
 │   ├── azure_d4s_v6/          D4s_v6, single run
 │   ├── azure_d8s_v6/          D8s_v6: run_00..run_10 + pooled/ (11 runs)
 │   └── azure_d8s_v6_followup/ D8s_v6 axis separation: run_01..run_08 + pooled/
