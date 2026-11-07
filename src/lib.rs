@@ -7,3 +7,4 @@ pub mod frame;
 pub mod metrics;
 pub mod persistence;
 pub mod pubsub;
+mod sync;

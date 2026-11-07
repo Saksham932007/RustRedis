@@ -191,4 +191,24 @@ mod tests {
         // Type should be "list"
         assert_eq!(db.get_type("mylist"), Some("list"));
     }
+
+    #[test]
+    fn test_db_survives_a_panic_while_the_lock_is_held() {
+        let db = Db::new();
+        db.write_string("key".to_string(), Bytes::from("value"), None);
+
+        let poisoner = db.clone();
+        let result = std::thread::spawn(move || {
+            let _guard = poisoner.shared.lock().unwrap();
+            panic!("simulated bug while holding the keyspace lock");
+        })
+        .join();
+        assert!(result.is_err());
+        assert!(db.shared.is_poisoned());
+
+        // The database keeps serving requests instead of panicking forever
+        assert_eq!(db.read_string("key").unwrap(), Bytes::from("value"));
+        db.write_string("other".to_string(), Bytes::from("x"), None);
+        assert_eq!(db.read_string("other").unwrap(), Bytes::from("x"));
+    }
 }

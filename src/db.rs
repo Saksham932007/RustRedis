@@ -1,3 +1,4 @@
+use crate::sync::LockExt;
 use bytes::Bytes;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -65,7 +66,7 @@ impl Db {
     /// - The key has expired
     /// - The key contains a non-String value
     pub fn read_string(&self, key: &str) -> Option<Bytes> {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         // Check if the entry exists
         let entry = state.entries.get(key)?;
@@ -88,7 +89,7 @@ impl Db {
 
     /// Write a String value to the database with optional expiration
     pub fn write_string(&self, key: String, value: Bytes, expires_at: Option<Instant>) {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         let entry = Entry {
             value: Value::String(value),
@@ -100,13 +101,13 @@ impl Db {
 
     /// Get the type of a value
     pub fn get_type(&self, key: &str) -> Option<&'static str> {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
         state.entries.get(key).map(|entry| entry.value.type_name())
     }
 
     /// Check if a key exists (and hasn't expired)
     pub fn exists(&self, key: &str) -> bool {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         if let Some(entry) = state.entries.get(key) {
             // Check if expired
@@ -124,7 +125,7 @@ impl Db {
 
     /// Delete a key from the database
     pub fn delete(&self, key: &str) -> bool {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
         state.entries.remove(key).is_some()
     }
 
@@ -132,7 +133,7 @@ impl Db {
 
     /// Push values to the left (head) of a list
     pub fn lpush(&self, key: String, values: Vec<Bytes>) -> usize {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         let entry = state.entries.entry(key).or_insert_with(|| Entry {
             value: Value::List(VecDeque::new()),
@@ -152,7 +153,7 @@ impl Db {
 
     /// Push values to the right (tail) of a list
     pub fn rpush(&self, key: String, values: Vec<Bytes>) -> usize {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         let entry = state.entries.entry(key).or_insert_with(|| Entry {
             value: Value::List(VecDeque::new()),
@@ -172,7 +173,7 @@ impl Db {
 
     /// Pop a value from the left (head) of a list
     pub fn lpop(&self, key: &str) -> Option<Bytes> {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         state
             .entries
@@ -185,7 +186,7 @@ impl Db {
 
     /// Pop a value from the right (tail) of a list
     pub fn rpop(&self, key: &str) -> Option<Bytes> {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         state
             .entries
@@ -198,7 +199,7 @@ impl Db {
 
     /// Get a range of elements from a list
     pub fn lrange(&self, key: &str, start: isize, stop: isize) -> Option<Vec<Bytes>> {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         state.entries.get(key).and_then(|entry| {
             match &entry.value {
@@ -236,7 +237,7 @@ impl Db {
 
     /// Get the length of a list
     pub fn llen(&self, key: &str) -> Option<usize> {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         state.entries.get(key).and_then(|entry| match &entry.value {
             Value::List(list) => Some(list.len()),
@@ -248,7 +249,7 @@ impl Db {
 
     /// Add members to a set
     pub fn sadd(&self, key: String, members: Vec<String>) -> usize {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         let entry = state.entries.entry(key).or_insert_with(|| Entry {
             value: Value::Set(HashSet::new()),
@@ -271,7 +272,7 @@ impl Db {
 
     /// Remove members from a set
     pub fn srem(&self, key: &str, members: Vec<String>) -> usize {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         state
             .entries
@@ -293,7 +294,7 @@ impl Db {
 
     /// Get all members of a set
     pub fn smembers(&self, key: &str) -> Option<Vec<String>> {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         state.entries.get(key).and_then(|entry| match &entry.value {
             Value::Set(set) => Some(set.iter().cloned().collect()),
@@ -303,7 +304,7 @@ impl Db {
 
     /// Check if a member exists in a set
     pub fn sismember(&self, key: &str, member: &str) -> bool {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         state
             .entries
@@ -317,7 +318,7 @@ impl Db {
 
     /// Get the cardinality (size) of a set
     pub fn scard(&self, key: &str) -> usize {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         state
             .entries
@@ -333,7 +334,7 @@ impl Db {
 
     /// Set a field in a hash
     pub fn hset(&self, key: String, field: String, value: Bytes) -> bool {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         let entry = state.entries.entry(key).or_insert_with(|| Entry {
             value: Value::Hash(HashMap::new()),
@@ -348,7 +349,7 @@ impl Db {
 
     /// Get a field from a hash
     pub fn hget(&self, key: &str, field: &str) -> Option<Bytes> {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         state.entries.get(key).and_then(|entry| match &entry.value {
             Value::Hash(hash) => hash.get(field).cloned(),
@@ -358,7 +359,7 @@ impl Db {
 
     /// Get all fields and values from a hash
     pub fn hgetall(&self, key: &str) -> Option<Vec<(String, Bytes)>> {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         state.entries.get(key).and_then(|entry| match &entry.value {
             Value::Hash(hash) => Some(hash.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
@@ -368,7 +369,7 @@ impl Db {
 
     /// Delete a field from a hash
     pub fn hdel(&self, key: &str, fields: Vec<String>) -> usize {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
 
         state
             .entries
@@ -390,7 +391,7 @@ impl Db {
 
     /// Check if a field exists in a hash
     pub fn hexists(&self, key: &str, field: &str) -> bool {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         state
             .entries
@@ -404,7 +405,7 @@ impl Db {
 
     /// Get the number of fields in a hash
     pub fn hlen(&self, key: &str) -> usize {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         state
             .entries
@@ -420,13 +421,13 @@ impl Db {
 
     /// Get the total number of keys in the database
     pub fn dbsize(&self) -> usize {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
         state.entries.len()
     }
 
     /// Clear all keys from the database
     pub fn flushdb(&self) {
-        let mut state = self.shared.lock().unwrap();
+        let mut state = self.shared.lock_recover();
         state.entries.clear();
     }
 
@@ -437,7 +438,7 @@ impl Db {
     /// - h*llo matches hllo, heeeello
     /// - h[ae]llo matches hello and hallo
     pub fn keys(&self, pattern: &str) -> Vec<String> {
-        let state = self.shared.lock().unwrap();
+        let state = self.shared.lock_recover();
 
         // Convert glob pattern to regex
         let regex_pattern = Self::glob_to_regex(pattern);
