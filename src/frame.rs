@@ -315,3 +315,109 @@ impl fmt::Display for Frame {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(input: &[u8]) -> Result<Option<Frame>, Error> {
+        let mut buf = BytesMut::from(input);
+        Frame::parse(&mut buf)
+    }
+
+    #[test]
+    fn parses_simple_string() {
+        assert_eq!(parse(b"+OK\r\n").unwrap(), Some(Frame::simple("OK")));
+    }
+
+    #[test]
+    fn parses_error() {
+        assert_eq!(parse(b"-ERR bad\r\n").unwrap(), Some(Frame::error("ERR bad")));
+    }
+
+    #[test]
+    fn parses_integer() {
+        assert_eq!(parse(b":-42\r\n").unwrap(), Some(Frame::integer(-42)));
+    }
+
+    #[test]
+    fn parses_bulk_string() {
+        assert_eq!(
+            parse(b"$5\r\nhello\r\n").unwrap(),
+            Some(Frame::bulk(Bytes::from_static(b"hello")))
+        );
+    }
+
+    #[test]
+    fn parses_empty_bulk_string() {
+        assert_eq!(
+            parse(b"$0\r\n\r\n").unwrap(),
+            Some(Frame::bulk(Bytes::new()))
+        );
+    }
+
+    #[test]
+    fn parses_null_bulk_string() {
+        assert_eq!(parse(b"$-1\r\n").unwrap(), Some(Frame::Null));
+    }
+
+    #[test]
+    fn parses_array_and_nested_array() {
+        let frame = parse(b"*2\r\n$3\r\nGET\r\n*1\r\n:1\r\n").unwrap().unwrap();
+        assert_eq!(
+            frame,
+            Frame::array(vec![
+                Frame::bulk(Bytes::from_static(b"GET")),
+                Frame::array(vec![Frame::integer(1)]),
+            ])
+        );
+    }
+
+    #[test]
+    fn bulk_may_contain_crlf_and_binary() {
+        assert_eq!(
+            parse(b"$4\r\n\r\n\xff\x00\r\n").unwrap(),
+            Some(Frame::bulk(Bytes::from_static(b"\r\n\xff\x00")))
+        );
+    }
+
+    #[test]
+    fn incomplete_inputs_return_none() {
+        for input in [
+            &b""[..],
+            b"+OK",
+            b"+OK\r",
+            b"$5\r\nhel",
+            b"$5\r\nhello",
+            b"*2\r\n$3\r\nGET\r\n",
+            b"$5",
+        ] {
+            assert!(parse(input).unwrap().is_none(), "input {:?}", input);
+        }
+    }
+
+    #[test]
+    fn incomplete_parse_does_not_consume_buffer() {
+        let mut buf = BytesMut::from(&b"$5\r\nhel"[..]);
+        assert!(Frame::parse(&mut buf).unwrap().is_none());
+        assert_eq!(&buf[..], b"$5\r\nhel");
+    }
+
+    #[test]
+    fn parse_consumes_exactly_one_frame() {
+        let mut buf = BytesMut::from(&b"+OK\r\n:1\r\n"[..]);
+        assert_eq!(Frame::parse(&mut buf).unwrap(), Some(Frame::simple("OK")));
+        assert_eq!(&buf[..], b":1\r\n");
+    }
+
+    #[test]
+    fn invalid_type_byte_is_rejected() {
+        assert!(matches!(parse(b"?foo\r\n"), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn non_numeric_length_is_rejected() {
+        assert!(matches!(parse(b"$abc\r\n"), Err(Error::Invalid(_))));
+        assert!(matches!(parse(b":1x\r\n"), Err(Error::Invalid(_))));
+    }
+}
