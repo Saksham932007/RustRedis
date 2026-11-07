@@ -2,6 +2,9 @@ use bytes::{Buf, Bytes, BytesMut};
 use std::fmt;
 use std::io::{self, Cursor};
 
+/// Maximum nesting depth of arrays, matching the limit Redis applies.
+const MAX_DEPTH: usize = 128;
+
 /// Error type for frame parsing
 #[derive(Debug)]
 pub enum Error {
@@ -105,7 +108,7 @@ impl Frame {
         let mut cursor = Cursor::new(&buf[..]);
 
         // Check if we have a complete frame
-        match check_complete(&mut cursor) {
+        match check_complete(&mut cursor, 0) {
             Ok(_) => {
                 // We have a complete frame, now parse it
                 let len = cursor.position() as usize;
@@ -114,7 +117,7 @@ impl Frame {
                 cursor.set_position(0);
 
                 // Parse the frame
-                let frame = parse_frame(&mut cursor)?;
+                let frame = parse_frame(&mut cursor, 0)?;
 
                 // Advance the buffer past the parsed frame
                 buf.advance(len);
@@ -128,7 +131,7 @@ impl Frame {
 }
 
 /// Check if a complete frame is available in the buffer
-fn check_complete(cursor: &mut Cursor<&[u8]>) -> Result<(), Error> {
+fn check_complete(cursor: &mut Cursor<&[u8]>, depth: usize) -> Result<(), Error> {
     if !cursor.has_remaining() {
         return Err(Error::Incomplete);
     }
@@ -152,9 +155,10 @@ fn check_complete(cursor: &mut Cursor<&[u8]>) -> Result<(), Error> {
                 // Null array (not standard but handle it)
                 None => Ok(()),
                 // Recursively check each element
+                Some(_) if depth >= MAX_DEPTH => Err(too_deep()),
                 Some(count) => {
                     for _ in 0..count {
-                        check_complete(cursor)?;
+                        check_complete(cursor, depth + 1)?;
                     }
                     Ok(())
                 }
@@ -167,8 +171,12 @@ fn check_complete(cursor: &mut Cursor<&[u8]>) -> Result<(), Error> {
     }
 }
 
+fn too_deep() -> Error {
+    Error::Invalid(format!("array nesting exceeds {} levels", MAX_DEPTH))
+}
+
 /// Parse a complete frame from the cursor
-fn parse_frame(cursor: &mut Cursor<&[u8]>) -> Result<Frame, Error> {
+fn parse_frame(cursor: &mut Cursor<&[u8]>, depth: usize) -> Result<Frame, Error> {
     match get_u8(cursor)? {
         b'+' => {
             let line = read_line(cursor)?;
@@ -196,10 +204,11 @@ fn parse_frame(cursor: &mut Cursor<&[u8]>) -> Result<Frame, Error> {
         },
         b'*' => match read_length(cursor, "array")? {
             None => Ok(Frame::Null),
+            Some(_) if depth >= MAX_DEPTH => Err(too_deep()),
             Some(count) => {
                 let mut frames = Vec::with_capacity(count);
                 for _ in 0..count {
-                    frames.push(parse_frame(cursor)?);
+                    frames.push(parse_frame(cursor, depth + 1)?);
                 }
                 Ok(Frame::Array(frames))
             }
@@ -443,6 +452,31 @@ mod tests {
     fn length_near_usize_max_does_not_overflow() {
         assert!(parse(b"$9223372036854775807\r\n").is_ok());
         assert!(parse(b"*9223372036854775807\r\n").is_ok());
+    }
+
+    fn nested(levels: usize) -> Vec<u8> {
+        let mut input = b"*1\r\n".repeat(levels);
+        input.extend_from_slice(b":1\r\n");
+        input
+    }
+
+    #[test]
+    fn nesting_at_the_limit_is_accepted() {
+        assert!(parse(&nested(MAX_DEPTH)).unwrap().is_some());
+    }
+
+    #[test]
+    fn nesting_beyond_the_limit_is_rejected() {
+        assert!(matches!(
+            parse(&nested(MAX_DEPTH + 1)),
+            Err(Error::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn extreme_nesting_does_not_overflow_the_stack() {
+        // 400 KB of input; used to recurse 100k frames deep.
+        assert!(matches!(parse(&nested(100_000)), Err(Error::Invalid(_))));
     }
 
     #[test]
