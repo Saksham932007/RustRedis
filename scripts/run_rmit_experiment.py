@@ -313,6 +313,7 @@ def start_server(
     env["RUSTREDIS_METRICS_STRATEGY"] = strategy.env_value
     env["RUSTREDIS_DISABLE_AOF"] = "1"
     env["RUSTREDIS_STORE"] = store
+    env["RUSTREDIS_BIND"] = f"127.0.0.1:{port}"
     if strategy.cardinality is not None:
         env["RUSTREDIS_METRICS_CARDINALITY"] = str(strategy.cardinality)
 
