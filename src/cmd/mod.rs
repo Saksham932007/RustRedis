@@ -15,25 +15,25 @@ pub enum Command {
 
     /// SET key value [EX seconds] - Set a key-value pair with optional expiration
     Set {
-        key: String,
+        key: Bytes,
         value: Bytes,
         expires_at: Option<Instant>,
     },
 
     /// GET key - Get a value by key
-    Get { key: String },
+    Get { key: Bytes },
 
     /// ECHO message - Echo back a message
     Echo { message: Bytes },
 
     /// DEL key [key ...] - Delete one or more keys
-    Del { keys: Vec<String> },
+    Del { keys: Vec<Bytes> },
 
     /// EXISTS key - Check if key exists
-    Exists { key: String },
+    Exists { key: Bytes },
 
     /// TYPE key - Get the type of a value
-    Type { key: String },
+    Type { key: Bytes },
 
     /// DBSIZE - Get the number of keys in the database
     DbSize,
@@ -46,65 +46,65 @@ pub enum Command {
 
     // List commands
     /// LPUSH key value [value ...] - Push values to the left of a list
-    LPush { key: String, values: Vec<Bytes> },
+    LPush { key: Bytes, values: Vec<Bytes> },
 
     /// RPUSH key value [value ...] - Push values to the right of a list
-    RPush { key: String, values: Vec<Bytes> },
+    RPush { key: Bytes, values: Vec<Bytes> },
 
     /// LPOP key - Pop a value from the left of a list
-    LPop { key: String },
+    LPop { key: Bytes },
 
     /// RPOP key - Pop a value from the right of a list
-    RPop { key: String },
+    RPop { key: Bytes },
 
     /// LRANGE key start stop - Get a range of elements from a list
     LRange {
-        key: String,
+        key: Bytes,
         start: isize,
         stop: isize,
     },
 
     /// LLEN key - Get the length of a list
-    LLen { key: String },
+    LLen { key: Bytes },
 
     // Set commands
     /// SADD key member [member ...] - Add members to a set
-    SAdd { key: String, members: Vec<String> },
+    SAdd { key: Bytes, members: Vec<Bytes> },
 
     /// SREM key member [member ...] - Remove members from a set
-    SRem { key: String, members: Vec<String> },
+    SRem { key: Bytes, members: Vec<Bytes> },
 
     /// SMEMBERS key - Get all members of a set
-    SMembers { key: String },
+    SMembers { key: Bytes },
 
     /// SISMEMBER key member - Check if a member exists in a set
-    SIsMember { key: String, member: String },
+    SIsMember { key: Bytes, member: Bytes },
 
     /// SCARD key - Get the cardinality (size) of a set
-    SCard { key: String },
+    SCard { key: Bytes },
 
     // Hash commands
     /// HSET key field value - Set a field in a hash
     HSet {
-        key: String,
-        field: String,
+        key: Bytes,
+        field: Bytes,
         value: Bytes,
     },
 
     /// HGET key field - Get a field from a hash
-    HGet { key: String, field: String },
+    HGet { key: Bytes, field: Bytes },
 
     /// HGETALL key - Get all fields and values from a hash
-    HGetAll { key: String },
+    HGetAll { key: Bytes },
 
     /// HDEL key field [field ...] - Delete fields from a hash
-    HDel { key: String, fields: Vec<String> },
+    HDel { key: Bytes, fields: Vec<Bytes> },
 
     /// HEXISTS key field - Check if a field exists in a hash
-    HExists { key: String, field: String },
+    HExists { key: Bytes, field: Bytes },
 
     /// HLEN key - Get the number of fields in a hash
-    HLen { key: String },
+    HLen { key: Bytes },
 
     // Pub/Sub commands
     /// PUBLISH channel message - Publish a message to a channel
@@ -118,6 +118,15 @@ pub enum Command {
 
     /// Unknown command
     Unknown(String),
+}
+
+/// Extract a binary-safe byte string argument from a bulk or simple string frame
+fn bytes_arg(frame: &Frame) -> Option<Bytes> {
+    match frame {
+        Frame::Bulk(data) => Some(data.clone()),
+        Frame::Simple(s) => Some(Bytes::copy_from_slice(s.as_bytes())),
+        _ => None,
+    }
 }
 
 impl Command {
@@ -165,12 +174,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'set' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("SET key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("SET key must be a string".to_string()),
                 };
 
                 let value = match &array[2] {
@@ -238,12 +244,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'get' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("GET key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("GET key must be a string".to_string()),
                 };
 
                 Ok(Command::Get { key })
@@ -270,12 +273,9 @@ impl Command {
 
                 let mut keys = Vec::new();
                 for item in array.iter().skip(1) {
-                    let key = match item {
-                        Frame::Bulk(data) => std::str::from_utf8(data)
-                            .map_err(|_| "invalid UTF-8 in key")?
-                            .to_string(),
-                        Frame::Simple(s) => s.clone(),
-                        _ => return Err("DEL key must be a string".to_string()),
+                    let key = match bytes_arg(item) {
+                        Some(bytes) => bytes,
+                        None => return Err("DEL key must be a string".to_string()),
                     };
                     keys.push(key);
                 }
@@ -288,12 +288,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'exists' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("EXISTS key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("EXISTS key must be a string".to_string()),
                 };
 
                 Ok(Command::Exists { key })
@@ -304,12 +301,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'type' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("TYPE key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("TYPE key must be a string".to_string()),
                 };
 
                 Ok(Command::Type { key })
@@ -352,12 +346,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'lpush' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("LPUSH key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("LPUSH key must be a string".to_string()),
                 };
 
                 let mut values = Vec::new();
@@ -378,12 +369,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'rpush' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("RPUSH key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("RPUSH key must be a string".to_string()),
                 };
 
                 let mut values = Vec::new();
@@ -404,12 +392,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'lpop' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("LPOP key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("LPOP key must be a string".to_string()),
                 };
 
                 Ok(Command::LPop { key })
@@ -420,12 +405,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'rpop' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("RPOP key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("RPOP key must be a string".to_string()),
                 };
 
                 Ok(Command::RPop { key })
@@ -436,12 +418,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'lrange' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("LRANGE key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("LRANGE key must be a string".to_string()),
                 };
 
                 let start = match &array[2] {
@@ -478,12 +457,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'llen' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("LLEN key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("LLEN key must be a string".to_string()),
                 };
 
                 Ok(Command::LLen { key })
@@ -494,22 +470,16 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'sadd' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("SADD key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("SADD key must be a string".to_string()),
                 };
 
                 let mut members = Vec::new();
                 for item in array.iter().skip(2) {
-                    let member = match item {
-                        Frame::Bulk(data) => std::str::from_utf8(data)
-                            .map_err(|_| "invalid UTF-8 in member")?
-                            .to_string(),
-                        Frame::Simple(s) => s.clone(),
-                        _ => return Err("SADD member must be a string".to_string()),
+                    let member = match bytes_arg(item) {
+                        Some(bytes) => bytes,
+                        None => return Err("SADD member must be a string".to_string()),
                     };
                     members.push(member);
                 }
@@ -522,22 +492,16 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'srem' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("SREM key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("SREM key must be a string".to_string()),
                 };
 
                 let mut members = Vec::new();
                 for item in array.iter().skip(2) {
-                    let member = match item {
-                        Frame::Bulk(data) => std::str::from_utf8(data)
-                            .map_err(|_| "invalid UTF-8 in member")?
-                            .to_string(),
-                        Frame::Simple(s) => s.clone(),
-                        _ => return Err("SREM member must be a string".to_string()),
+                    let member = match bytes_arg(item) {
+                        Some(bytes) => bytes,
+                        None => return Err("SREM member must be a string".to_string()),
                     };
                     members.push(member);
                 }
@@ -550,12 +514,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'smembers' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("SMEMBERS key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("SMEMBERS key must be a string".to_string()),
                 };
 
                 Ok(Command::SMembers { key })
@@ -566,20 +527,14 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'sismember' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("SISMEMBER key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("SISMEMBER key must be a string".to_string()),
                 };
 
-                let member = match &array[2] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in member")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("SISMEMBER member must be a string".to_string()),
+                let member = match bytes_arg(&array[2]) {
+                    Some(bytes) => bytes,
+                    None => return Err("SISMEMBER member must be a string".to_string()),
                 };
 
                 Ok(Command::SIsMember { key, member })
@@ -590,12 +545,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'scard' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("SCARD key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("SCARD key must be a string".to_string()),
                 };
 
                 Ok(Command::SCard { key })
@@ -606,20 +558,14 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'hset' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("HSET key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("HSET key must be a string".to_string()),
                 };
 
-                let field = match &array[2] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in field")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("HSET field must be a string".to_string()),
+                let field = match bytes_arg(&array[2]) {
+                    Some(bytes) => bytes,
+                    None => return Err("HSET field must be a string".to_string()),
                 };
 
                 let value = match &array[3] {
@@ -636,20 +582,14 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'hget' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("HGET key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("HGET key must be a string".to_string()),
                 };
 
-                let field = match &array[2] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in field")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("HGET field must be a string".to_string()),
+                let field = match bytes_arg(&array[2]) {
+                    Some(bytes) => bytes,
+                    None => return Err("HGET field must be a string".to_string()),
                 };
 
                 Ok(Command::HGet { key, field })
@@ -660,12 +600,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'hgetall' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("HGETALL key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("HGETALL key must be a string".to_string()),
                 };
 
                 Ok(Command::HGetAll { key })
@@ -676,22 +613,16 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'hdel' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("HDEL key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("HDEL key must be a string".to_string()),
                 };
 
                 let mut fields = Vec::new();
                 for item in array.iter().skip(2) {
-                    let field = match item {
-                        Frame::Bulk(data) => std::str::from_utf8(data)
-                            .map_err(|_| "invalid UTF-8 in field")?
-                            .to_string(),
-                        Frame::Simple(s) => s.clone(),
-                        _ => return Err("HDEL field must be a string".to_string()),
+                    let field = match bytes_arg(item) {
+                        Some(bytes) => bytes,
+                        None => return Err("HDEL field must be a string".to_string()),
                     };
                     fields.push(field);
                 }
@@ -704,20 +635,14 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'hexists' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("HEXISTS key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("HEXISTS key must be a string".to_string()),
                 };
 
-                let field = match &array[2] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in field")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("HEXISTS field must be a string".to_string()),
+                let field = match bytes_arg(&array[2]) {
+                    Some(bytes) => bytes,
+                    None => return Err("HEXISTS field must be a string".to_string()),
                 };
 
                 Ok(Command::HExists { key, field })
@@ -728,12 +653,9 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'hlen' command".to_string());
                 }
 
-                let key = match &array[1] {
-                    Frame::Bulk(data) => std::str::from_utf8(data)
-                        .map_err(|_| "invalid UTF-8 in key")?
-                        .to_string(),
-                    Frame::Simple(s) => s.clone(),
-                    _ => return Err("HLEN key must be a string".to_string()),
+                let key = match bytes_arg(&array[1]) {
+                    Some(bytes) => bytes,
+                    None => return Err("HLEN key must be a string".to_string()),
                 };
 
                 Ok(Command::HLen { key })
@@ -814,6 +736,9 @@ impl Command {
     }
 
     /// Return a best-effort logical key for key-space metrics strategies.
+    ///
+    /// Keys that are not valid UTF-8 yield no hint; they are still stored and
+    /// served normally, they just are not attributed to a key in the metrics.
     pub fn metrics_key_hint(&self) -> Option<&str> {
         match self {
             Command::Set { key, .. }
@@ -836,8 +761,8 @@ impl Command {
             | Command::HGetAll { key }
             | Command::HDel { key, .. }
             | Command::HExists { key, .. }
-            | Command::HLen { key } => Some(key.as_str()),
-            Command::Del { keys } => keys.first().map(|key| key.as_str()),
+            | Command::HLen { key } => std::str::from_utf8(key).ok(),
+            Command::Del { keys } => keys.first().and_then(|key| std::str::from_utf8(key).ok()),
             Command::Keys { pattern } => Some(pattern.as_str()),
             Command::Publish { channel, .. } => Some(channel.as_str()),
             _ => None,

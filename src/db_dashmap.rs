@@ -9,8 +9,8 @@ use std::time::Instant;
 pub enum Value {
     String(Bytes),
     List(VecDeque<Bytes>),
-    Set(HashSet<String>),
-    Hash(HashMap<String, Bytes>),
+    Set(HashSet<Bytes>),
+    Hash(HashMap<Bytes, Bytes>),
 }
 
 impl Value {
@@ -53,7 +53,7 @@ impl Entry {
 /// where ANY read or write blocks ALL other operations.
 #[derive(Clone)]
 pub struct DbDashMap {
-    entries: Arc<DashMap<String, Entry>>,
+    entries: Arc<DashMap<Bytes, Entry>>,
 }
 
 impl DbDashMap {
@@ -65,7 +65,7 @@ impl DbDashMap {
     }
 
     /// Helper: remove entry if expired, returning true if it was removed
-    fn remove_if_expired(&self, key: &str) -> bool {
+    fn remove_if_expired(&self, key: &[u8]) -> bool {
         if let Some(entry) = self.entries.get(key) {
             if entry.is_expired() {
                 drop(entry); // Release read reference before removing
@@ -77,7 +77,7 @@ impl DbDashMap {
     }
 
     /// Read a String value from the database
-    pub fn read_string(&self, key: &str) -> Option<Bytes> {
+    pub fn read_string(&self, key: &[u8]) -> Option<Bytes> {
         // Check expiration first
         if self.remove_if_expired(key) {
             return None;
@@ -90,7 +90,7 @@ impl DbDashMap {
     }
 
     /// Write a String value to the database with optional expiration
-    pub fn write_string(&self, key: String, value: Bytes, expires_at: Option<Instant>) {
+    pub fn write_string(&self, key: Bytes, value: Bytes, expires_at: Option<Instant>) {
         self.entries.insert(
             key,
             Entry {
@@ -101,12 +101,12 @@ impl DbDashMap {
     }
 
     /// Get the type of a value
-    pub fn get_type(&self, key: &str) -> Option<&'static str> {
+    pub fn get_type(&self, key: &[u8]) -> Option<&'static str> {
         self.entries.get(key).map(|entry| entry.value.type_name())
     }
 
     /// Check if a key exists (and hasn't expired)
-    pub fn exists(&self, key: &str) -> bool {
+    pub fn exists(&self, key: &[u8]) -> bool {
         if self.remove_if_expired(key) {
             return false;
         }
@@ -114,13 +114,13 @@ impl DbDashMap {
     }
 
     /// Delete a key from the database
-    pub fn delete(&self, key: &str) -> bool {
+    pub fn delete(&self, key: &[u8]) -> bool {
         self.entries.remove(key).is_some()
     }
 
     // ===== List Operations =====
 
-    pub fn lpush(&self, key: String, values: Vec<Bytes>) -> usize {
+    pub fn lpush(&self, key: Bytes, values: Vec<Bytes>) -> usize {
         let mut entry = self.entries.entry(key).or_insert_with(|| Entry {
             value: Value::List(VecDeque::new()),
             expires_at: None,
@@ -137,7 +137,7 @@ impl DbDashMap {
         }
     }
 
-    pub fn rpush(&self, key: String, values: Vec<Bytes>) -> usize {
+    pub fn rpush(&self, key: Bytes, values: Vec<Bytes>) -> usize {
         let mut entry = self.entries.entry(key).or_insert_with(|| Entry {
             value: Value::List(VecDeque::new()),
             expires_at: None,
@@ -154,7 +154,7 @@ impl DbDashMap {
         }
     }
 
-    pub fn lpop(&self, key: &str) -> Option<Bytes> {
+    pub fn lpop(&self, key: &[u8]) -> Option<Bytes> {
         self.entries
             .get_mut(key)?
             .value_mut()
@@ -162,7 +162,7 @@ impl DbDashMap {
             .and_then(|list| list.pop_front())
     }
 
-    pub fn rpop(&self, key: &str) -> Option<Bytes> {
+    pub fn rpop(&self, key: &[u8]) -> Option<Bytes> {
         self.entries
             .get_mut(key)?
             .value_mut()
@@ -170,7 +170,7 @@ impl DbDashMap {
             .and_then(|list| list.pop_back())
     }
 
-    pub fn lrange(&self, key: &str, start: isize, stop: isize) -> Option<Vec<Bytes>> {
+    pub fn lrange(&self, key: &[u8], start: isize, stop: isize) -> Option<Vec<Bytes>> {
         self.entries.get(key).and_then(|entry| {
             match &entry.value {
                 Value::List(list) => {
@@ -203,7 +203,7 @@ impl DbDashMap {
         })
     }
 
-    pub fn llen(&self, key: &str) -> Option<usize> {
+    pub fn llen(&self, key: &[u8]) -> Option<usize> {
         self.entries.get(key).and_then(|entry| match &entry.value {
             Value::List(list) => Some(list.len()),
             _ => None,
@@ -212,7 +212,7 @@ impl DbDashMap {
 
     // ===== Set Operations =====
 
-    pub fn sadd(&self, key: String, members: Vec<String>) -> usize {
+    pub fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> usize {
         let mut entry = self.entries.entry(key).or_insert_with(|| Entry {
             value: Value::Set(HashSet::new()),
             expires_at: None,
@@ -232,7 +232,7 @@ impl DbDashMap {
         }
     }
 
-    pub fn srem(&self, key: &str, members: Vec<String>) -> usize {
+    pub fn srem(&self, key: &[u8], members: Vec<Bytes>) -> usize {
         self.entries
             .get_mut(key)
             .map(|mut entry| match &mut entry.value {
@@ -250,14 +250,14 @@ impl DbDashMap {
             .unwrap_or(0)
     }
 
-    pub fn smembers(&self, key: &str) -> Option<Vec<String>> {
+    pub fn smembers(&self, key: &[u8]) -> Option<Vec<Bytes>> {
         self.entries.get(key).and_then(|entry| match &entry.value {
             Value::Set(set) => Some(set.iter().cloned().collect()),
             _ => None,
         })
     }
 
-    pub fn sismember(&self, key: &str, member: &str) -> bool {
+    pub fn sismember(&self, key: &[u8], member: &[u8]) -> bool {
         self.entries
             .get(key)
             .map(|entry| match &entry.value {
@@ -267,7 +267,7 @@ impl DbDashMap {
             .unwrap_or(false)
     }
 
-    pub fn scard(&self, key: &str) -> usize {
+    pub fn scard(&self, key: &[u8]) -> usize {
         self.entries
             .get(key)
             .map(|entry| match &entry.value {
@@ -279,7 +279,7 @@ impl DbDashMap {
 
     // ===== Hash Operations =====
 
-    pub fn hset(&self, key: String, field: String, value: Bytes) -> bool {
+    pub fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> bool {
         let mut entry = self.entries.entry(key).or_insert_with(|| Entry {
             value: Value::Hash(HashMap::new()),
             expires_at: None,
@@ -291,21 +291,21 @@ impl DbDashMap {
         }
     }
 
-    pub fn hget(&self, key: &str, field: &str) -> Option<Bytes> {
+    pub fn hget(&self, key: &[u8], field: &[u8]) -> Option<Bytes> {
         self.entries.get(key).and_then(|entry| match &entry.value {
             Value::Hash(hash) => hash.get(field).cloned(),
             _ => None,
         })
     }
 
-    pub fn hgetall(&self, key: &str) -> Option<Vec<(String, Bytes)>> {
+    pub fn hgetall(&self, key: &[u8]) -> Option<Vec<(Bytes, Bytes)>> {
         self.entries.get(key).and_then(|entry| match &entry.value {
             Value::Hash(hash) => Some(hash.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
             _ => None,
         })
     }
 
-    pub fn hdel(&self, key: &str, fields: Vec<String>) -> usize {
+    pub fn hdel(&self, key: &[u8], fields: Vec<Bytes>) -> usize {
         self.entries
             .get_mut(key)
             .map(|mut entry| match &mut entry.value {
@@ -323,7 +323,7 @@ impl DbDashMap {
             .unwrap_or(0)
     }
 
-    pub fn hexists(&self, key: &str, field: &str) -> bool {
+    pub fn hexists(&self, key: &[u8], field: &[u8]) -> bool {
         self.entries
             .get(key)
             .map(|entry| match &entry.value {
@@ -333,7 +333,7 @@ impl DbDashMap {
             .unwrap_or(false)
     }
 
-    pub fn hlen(&self, key: &str) -> usize {
+    pub fn hlen(&self, key: &[u8]) -> usize {
         self.entries
             .get(key)
             .map(|entry| match &entry.value {
@@ -353,9 +353,9 @@ impl DbDashMap {
         self.entries.clear();
     }
 
-    pub fn keys(&self, pattern: &str) -> Vec<String> {
+    pub fn keys(&self, pattern: &str) -> Vec<Bytes> {
         let regex_pattern = Self::glob_to_regex(pattern);
-        let re = match regex::Regex::new(&regex_pattern) {
+        let re = match regex::bytes::Regex::new(&regex_pattern) {
             Ok(r) => r,
             Err(_) => return Vec::new(),
         };
@@ -368,7 +368,7 @@ impl DbDashMap {
     }
 
     fn glob_to_regex(pattern: &str) -> String {
-        let mut regex = String::from("^");
+        let mut regex = String::from("(?s-u)^");
         let mut chars = pattern.chars().peekable();
 
         while let Some(c) = chars.next() {
@@ -433,9 +433,9 @@ mod tests {
     fn test_dashmap_string_operations() {
         let db = DbDashMap::new();
 
-        db.write_string("key1".to_string(), Bytes::from("value1"), None);
-        assert_eq!(db.read_string("key1").unwrap(), Bytes::from("value1"));
-        assert!(db.read_string("nonexistent").is_none());
+        db.write_string(Bytes::from("key1"), Bytes::from("value1"), None);
+        assert_eq!(db.read_string(b"key1").unwrap(), Bytes::from("value1"));
+        assert!(db.read_string(b"nonexistent").is_none());
     }
 
     #[test]
@@ -443,24 +443,24 @@ mod tests {
         let db = DbDashMap::new();
 
         let len = db.lpush(
-            "mylist".to_string(),
+            Bytes::from("mylist"),
             vec![Bytes::from("a"), Bytes::from("b")],
         );
         assert_eq!(len, 2);
 
-        let len = db.rpush("mylist".to_string(), vec![Bytes::from("c")]);
+        let len = db.rpush(Bytes::from("mylist"), vec![Bytes::from("c")]);
         assert_eq!(len, 3);
 
-        let range = db.lrange("mylist", 0, -1).unwrap();
+        let range = db.lrange(b"mylist", 0, -1).unwrap();
         assert_eq!(range.len(), 3);
         assert_eq!(range[0], Bytes::from("a"));
         assert_eq!(range[1], Bytes::from("b"));
         assert_eq!(range[2], Bytes::from("c"));
 
-        let value = db.lpop("mylist").unwrap();
+        let value = db.lpop(b"mylist").unwrap();
         assert_eq!(value, Bytes::from("a"));
 
-        assert_eq!(db.llen("mylist").unwrap(), 2);
+        assert_eq!(db.llen(b"mylist").unwrap(), 2);
     }
 
     #[test]
@@ -468,18 +468,18 @@ mod tests {
         let db = DbDashMap::new();
 
         let added = db.sadd(
-            "myset".to_string(),
-            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            Bytes::from("myset"),
+            vec![Bytes::from("a"), Bytes::from("b"), Bytes::from("c")],
         );
         assert_eq!(added, 3);
 
-        assert!(db.sismember("myset", "a"));
-        assert!(!db.sismember("myset", "d"));
-        assert_eq!(db.scard("myset"), 3);
+        assert!(db.sismember(b"myset", b"a"));
+        assert!(!db.sismember(b"myset", b"d"));
+        assert_eq!(db.scard(b"myset"), 3);
 
-        let removed = db.srem("myset", vec!["b".to_string()]);
+        let removed = db.srem(b"myset", vec![Bytes::from("b")]);
         assert_eq!(removed, 1);
-        assert_eq!(db.scard("myset"), 2);
+        assert_eq!(db.scard(b"myset"), 2);
     }
 
     #[test]
@@ -487,42 +487,42 @@ mod tests {
         let db = DbDashMap::new();
 
         let is_new = db.hset(
-            "user:1".to_string(),
-            "name".to_string(),
+            Bytes::from("user:1"),
+            Bytes::from("name"),
             Bytes::from("Alice"),
         );
         assert!(is_new);
 
-        let value = db.hget("user:1", "name").unwrap();
+        let value = db.hget(b"user:1", b"name").unwrap();
         assert_eq!(value, Bytes::from("Alice"));
 
-        assert!(db.hexists("user:1", "name"));
-        assert!(!db.hexists("user:1", "age"));
+        assert!(db.hexists(b"user:1", b"name"));
+        assert!(!db.hexists(b"user:1", b"age"));
 
-        db.hset("user:1".to_string(), "age".to_string(), Bytes::from("30"));
-        assert_eq!(db.hlen("user:1"), 2);
+        db.hset(Bytes::from("user:1"), Bytes::from("age"), Bytes::from("30"));
+        assert_eq!(db.hlen(b"user:1"), 2);
 
-        let deleted = db.hdel("user:1", vec!["age".to_string()]);
+        let deleted = db.hdel(b"user:1", vec![Bytes::from("age")]);
         assert_eq!(deleted, 1);
-        assert_eq!(db.hlen("user:1"), 1);
+        assert_eq!(db.hlen(b"user:1"), 1);
     }
 
     #[test]
     fn test_dashmap_utility_operations() {
         let db = DbDashMap::new();
 
-        db.write_string("key1".to_string(), Bytes::from("val1"), None);
-        db.write_string("key2".to_string(), Bytes::from("val2"), None);
-        db.lpush("list1".to_string(), vec![Bytes::from("item")]);
+        db.write_string(Bytes::from("key1"), Bytes::from("val1"), None);
+        db.write_string(Bytes::from("key2"), Bytes::from("val2"), None);
+        db.lpush(Bytes::from("list1"), vec![Bytes::from("item")]);
 
         assert_eq!(db.dbsize(), 3);
-        assert!(db.exists("key1"));
-        assert!(!db.exists("nonexistent"));
+        assert!(db.exists(b"key1"));
+        assert!(!db.exists(b"nonexistent"));
 
-        assert_eq!(db.get_type("key1"), Some("string"));
-        assert_eq!(db.get_type("list1"), Some("list"));
+        assert_eq!(db.get_type(b"key1"), Some("string"));
+        assert_eq!(db.get_type(b"list1"), Some("list"));
 
-        assert!(db.delete("key1"));
+        assert!(db.delete(b"key1"));
         assert_eq!(db.dbsize(), 2);
 
         db.flushdb();
@@ -536,13 +536,13 @@ mod tests {
         let db = DbDashMap::new();
 
         let expires_at = Instant::now() + Duration::from_millis(100);
-        db.write_string("temp".to_string(), Bytes::from("value"), Some(expires_at));
+        db.write_string(Bytes::from("temp"), Bytes::from("value"), Some(expires_at));
 
-        assert!(db.read_string("temp").is_some());
+        assert!(db.read_string(b"temp").is_some());
 
         std::thread::sleep(Duration::from_millis(150));
 
-        assert!(db.read_string("temp").is_none());
+        assert!(db.read_string(b"temp").is_none());
     }
 
     #[test]
@@ -559,7 +559,7 @@ mod tests {
             handles.push(thread::spawn(move || {
                 for i in 0..100 {
                     db.write_string(
-                        format!("key:{}:{}", t, i),
+                        format!("key:{}:{}", t, i).into(),
                         Bytes::from(format!("value:{}:{}", t, i)),
                         None,
                     );

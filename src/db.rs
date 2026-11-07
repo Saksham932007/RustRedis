@@ -9,8 +9,8 @@ use std::time::Instant;
 pub enum Value {
     String(Bytes),
     List(VecDeque<Bytes>),
-    Set(HashSet<String>),
-    Hash(HashMap<String, Bytes>),
+    Set(HashSet<Bytes>),
+    Hash(HashMap<Bytes, Bytes>),
 }
 
 impl Value {
@@ -46,7 +46,7 @@ struct Entry {
 /// The actual database state
 struct DbState {
     /// Key-value storage supporting multiple data types
-    entries: HashMap<String, Entry>,
+    entries: HashMap<Bytes, Entry>,
 }
 
 impl Db {
@@ -65,7 +65,7 @@ impl Db {
     /// - The key doesn't exist
     /// - The key has expired
     /// - The key contains a non-String value
-    pub fn read_string(&self, key: &str) -> Option<Bytes> {
+    pub fn read_string(&self, key: &[u8]) -> Option<Bytes> {
         let mut state = self.shared.lock_recover();
 
         // Check if the entry exists
@@ -88,7 +88,7 @@ impl Db {
     }
 
     /// Write a String value to the database with optional expiration
-    pub fn write_string(&self, key: String, value: Bytes, expires_at: Option<Instant>) {
+    pub fn write_string(&self, key: Bytes, value: Bytes, expires_at: Option<Instant>) {
         let mut state = self.shared.lock_recover();
 
         let entry = Entry {
@@ -100,13 +100,13 @@ impl Db {
     }
 
     /// Get the type of a value
-    pub fn get_type(&self, key: &str) -> Option<&'static str> {
+    pub fn get_type(&self, key: &[u8]) -> Option<&'static str> {
         let state = self.shared.lock_recover();
         state.entries.get(key).map(|entry| entry.value.type_name())
     }
 
     /// Check if a key exists (and hasn't expired)
-    pub fn exists(&self, key: &str) -> bool {
+    pub fn exists(&self, key: &[u8]) -> bool {
         let mut state = self.shared.lock_recover();
 
         if let Some(entry) = state.entries.get(key) {
@@ -124,7 +124,7 @@ impl Db {
     }
 
     /// Delete a key from the database
-    pub fn delete(&self, key: &str) -> bool {
+    pub fn delete(&self, key: &[u8]) -> bool {
         let mut state = self.shared.lock_recover();
         state.entries.remove(key).is_some()
     }
@@ -132,7 +132,7 @@ impl Db {
     // ===== List Operations =====
 
     /// Push values to the left (head) of a list
-    pub fn lpush(&self, key: String, values: Vec<Bytes>) -> usize {
+    pub fn lpush(&self, key: Bytes, values: Vec<Bytes>) -> usize {
         let mut state = self.shared.lock_recover();
 
         let entry = state.entries.entry(key).or_insert_with(|| Entry {
@@ -152,7 +152,7 @@ impl Db {
     }
 
     /// Push values to the right (tail) of a list
-    pub fn rpush(&self, key: String, values: Vec<Bytes>) -> usize {
+    pub fn rpush(&self, key: Bytes, values: Vec<Bytes>) -> usize {
         let mut state = self.shared.lock_recover();
 
         let entry = state.entries.entry(key).or_insert_with(|| Entry {
@@ -172,7 +172,7 @@ impl Db {
     }
 
     /// Pop a value from the left (head) of a list
-    pub fn lpop(&self, key: &str) -> Option<Bytes> {
+    pub fn lpop(&self, key: &[u8]) -> Option<Bytes> {
         let mut state = self.shared.lock_recover();
 
         state
@@ -185,7 +185,7 @@ impl Db {
     }
 
     /// Pop a value from the right (tail) of a list
-    pub fn rpop(&self, key: &str) -> Option<Bytes> {
+    pub fn rpop(&self, key: &[u8]) -> Option<Bytes> {
         let mut state = self.shared.lock_recover();
 
         state
@@ -198,7 +198,7 @@ impl Db {
     }
 
     /// Get a range of elements from a list
-    pub fn lrange(&self, key: &str, start: isize, stop: isize) -> Option<Vec<Bytes>> {
+    pub fn lrange(&self, key: &[u8], start: isize, stop: isize) -> Option<Vec<Bytes>> {
         let state = self.shared.lock_recover();
 
         state.entries.get(key).and_then(|entry| {
@@ -236,7 +236,7 @@ impl Db {
     }
 
     /// Get the length of a list
-    pub fn llen(&self, key: &str) -> Option<usize> {
+    pub fn llen(&self, key: &[u8]) -> Option<usize> {
         let state = self.shared.lock_recover();
 
         state.entries.get(key).and_then(|entry| match &entry.value {
@@ -248,7 +248,7 @@ impl Db {
     // ===== Set Operations =====
 
     /// Add members to a set
-    pub fn sadd(&self, key: String, members: Vec<String>) -> usize {
+    pub fn sadd(&self, key: Bytes, members: Vec<Bytes>) -> usize {
         let mut state = self.shared.lock_recover();
 
         let entry = state.entries.entry(key).or_insert_with(|| Entry {
@@ -271,7 +271,7 @@ impl Db {
     }
 
     /// Remove members from a set
-    pub fn srem(&self, key: &str, members: Vec<String>) -> usize {
+    pub fn srem(&self, key: &[u8], members: Vec<Bytes>) -> usize {
         let mut state = self.shared.lock_recover();
 
         state
@@ -293,7 +293,7 @@ impl Db {
     }
 
     /// Get all members of a set
-    pub fn smembers(&self, key: &str) -> Option<Vec<String>> {
+    pub fn smembers(&self, key: &[u8]) -> Option<Vec<Bytes>> {
         let state = self.shared.lock_recover();
 
         state.entries.get(key).and_then(|entry| match &entry.value {
@@ -303,7 +303,7 @@ impl Db {
     }
 
     /// Check if a member exists in a set
-    pub fn sismember(&self, key: &str, member: &str) -> bool {
+    pub fn sismember(&self, key: &[u8], member: &[u8]) -> bool {
         let state = self.shared.lock_recover();
 
         state
@@ -317,7 +317,7 @@ impl Db {
     }
 
     /// Get the cardinality (size) of a set
-    pub fn scard(&self, key: &str) -> usize {
+    pub fn scard(&self, key: &[u8]) -> usize {
         let state = self.shared.lock_recover();
 
         state
@@ -333,7 +333,7 @@ impl Db {
     // ===== Hash Operations =====
 
     /// Set a field in a hash
-    pub fn hset(&self, key: String, field: String, value: Bytes) -> bool {
+    pub fn hset(&self, key: Bytes, field: Bytes, value: Bytes) -> bool {
         let mut state = self.shared.lock_recover();
 
         let entry = state.entries.entry(key).or_insert_with(|| Entry {
@@ -348,7 +348,7 @@ impl Db {
     }
 
     /// Get a field from a hash
-    pub fn hget(&self, key: &str, field: &str) -> Option<Bytes> {
+    pub fn hget(&self, key: &[u8], field: &[u8]) -> Option<Bytes> {
         let state = self.shared.lock_recover();
 
         state.entries.get(key).and_then(|entry| match &entry.value {
@@ -358,7 +358,7 @@ impl Db {
     }
 
     /// Get all fields and values from a hash
-    pub fn hgetall(&self, key: &str) -> Option<Vec<(String, Bytes)>> {
+    pub fn hgetall(&self, key: &[u8]) -> Option<Vec<(Bytes, Bytes)>> {
         let state = self.shared.lock_recover();
 
         state.entries.get(key).and_then(|entry| match &entry.value {
@@ -368,7 +368,7 @@ impl Db {
     }
 
     /// Delete a field from a hash
-    pub fn hdel(&self, key: &str, fields: Vec<String>) -> usize {
+    pub fn hdel(&self, key: &[u8], fields: Vec<Bytes>) -> usize {
         let mut state = self.shared.lock_recover();
 
         state
@@ -390,7 +390,7 @@ impl Db {
     }
 
     /// Check if a field exists in a hash
-    pub fn hexists(&self, key: &str, field: &str) -> bool {
+    pub fn hexists(&self, key: &[u8], field: &[u8]) -> bool {
         let state = self.shared.lock_recover();
 
         state
@@ -404,7 +404,7 @@ impl Db {
     }
 
     /// Get the number of fields in a hash
-    pub fn hlen(&self, key: &str) -> usize {
+    pub fn hlen(&self, key: &[u8]) -> usize {
         let state = self.shared.lock_recover();
 
         state
@@ -437,12 +437,12 @@ impl Db {
     /// - h?llo matches hello, hallo, hxllo
     /// - h*llo matches hllo, heeeello
     /// - h[ae]llo matches hello and hallo
-    pub fn keys(&self, pattern: &str) -> Vec<String> {
+    pub fn keys(&self, pattern: &str) -> Vec<Bytes> {
         let state = self.shared.lock_recover();
 
         // Convert glob pattern to regex
         let regex_pattern = Self::glob_to_regex(pattern);
-        let re = match regex::Regex::new(&regex_pattern) {
+        let re = match regex::bytes::Regex::new(&regex_pattern) {
             Ok(r) => r,
             Err(_) => return Vec::new(),
         };
@@ -457,7 +457,7 @@ impl Db {
 
     /// Convert a glob pattern to a regex pattern
     fn glob_to_regex(pattern: &str) -> String {
-        let mut regex = String::from("^");
+        let mut regex = String::from("(?s-u)^");
         let mut chars = pattern.chars().peekable();
 
         while let Some(c) = chars.next() {

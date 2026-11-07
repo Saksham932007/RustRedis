@@ -46,3 +46,34 @@ fn set_ex_without_a_value_is_a_syntax_error() {
     let err = parse(&["SET", "k", "v", "EX"]).err().unwrap();
     assert!(err.contains("syntax error"), "{}", err);
 }
+
+#[test]
+fn binary_keys_are_accepted() {
+    let raw = Frame::array(vec![
+        Frame::bulk(Bytes::from_static(b"SET")),
+        Frame::bulk(Bytes::from_static(b"\xff\xfe\x00")),
+        Frame::bulk(Bytes::from_static(b"v")),
+    ]);
+    match Command::from_frame(&raw).unwrap() {
+        Command::Set { key, .. } => assert_eq!(&key[..], b"\xff\xfe\x00"),
+        _ => panic!("expected SET"),
+    }
+}
+
+#[test]
+fn binary_set_members_and_hash_fields_are_accepted() {
+    let sadd = Frame::array(vec![
+        Frame::bulk(Bytes::from_static(b"SADD")),
+        Frame::bulk(Bytes::from_static(b"s")),
+        Frame::bulk(Bytes::from_static(b"\x80\x81")),
+    ]);
+    assert!(Command::from_frame(&sadd).is_ok());
+
+    let hset = Frame::array(vec![
+        Frame::bulk(Bytes::from_static(b"HSET")),
+        Frame::bulk(Bytes::from_static(b"h")),
+        Frame::bulk(Bytes::from_static(b"\xc3\x28")),
+        Frame::bulk(Bytes::from_static(b"v")),
+    ]);
+    assert!(Command::from_frame(&hset).is_ok());
+}
