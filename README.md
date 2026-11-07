@@ -55,6 +55,18 @@ Interleaved Trials (Abedi, Heard & Brecht 2015), not invented here.
   measurement.
 - Further caveats are listed in [docs/RESULTS.md](docs/RESULTS.md#caveats).
 
+## Testing and hardening
+
+`cargo test --workspace` runs unit tests for the RESP parser, command parsing, both
+keyspace stores and the connection layer, plus end-to-end tests that start the real
+server on each store. CI also runs rustfmt and clippy with warnings denied.
+
+The parser is fuzzed (`cargo +nightly fuzz run parse_frame`, target in `fuzz/`). On the
+original code it crashed within seconds; the crashes it and the code review found
+(negative lengths, unbounded nesting, unbounded sizes, `EX` overflow) are fixed and each
+has a regression test. The hardened parser survived a one-hour run of 29.3 million
+executions. See [docs/REVIEW_RESPONSE.md](docs/REVIEW_RESPONSE.md).
+
 ## Reproducing the paper
 
 ```bash
