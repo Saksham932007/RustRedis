@@ -114,10 +114,11 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Bind the TCP listener to port 6379 (Redis default port)
-    let listener = TcpListener::bind("127.0.0.1:6379").await?;
+    // Bind the TCP listener (defaults to the Redis port on loopback)
+    let bind_addr = std::env::var("RUSTREDIS_BIND").unwrap_or_else(|_| "127.0.0.1:6379".to_string());
+    let listener = TcpListener::bind(&bind_addr).await?;
 
-    info!("RustRedis server listening on 127.0.0.1:6379");
+    info!("RustRedis server listening on {}", listener.local_addr()?);
     info!("Press CTRL+C to shutdown gracefully");
 
     loop {
