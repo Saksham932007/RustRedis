@@ -122,9 +122,9 @@ pub enum Command {
 
 impl Command {
     /// Parse a command from a frame
-    pub fn from_frame(frame: Frame) -> Result<Command, String> {
+    pub fn from_frame(frame: &Frame) -> Result<Command, String> {
         // Commands are sent as arrays: [command_name, arg1, arg2, ...]
-        let mut array = match frame {
+        let array = match frame {
             Frame::Array(arr) => arr,
             _ => return Err("command must be an array".to_string()),
         };
@@ -149,7 +149,7 @@ impl Command {
                 if array.len() == 1 {
                     Ok(Command::Ping(None))
                 } else if array.len() == 2 {
-                    let message = match array.remove(1) {
+                    let message = match array[1].clone() {
                         Frame::Bulk(data) => data,
                         Frame::Simple(s) => Bytes::from(s),
                         _ => return Err("PING message must be a string".to_string()),
@@ -248,7 +248,7 @@ impl Command {
                     return Err("ERR wrong number of arguments for 'echo' command".to_string());
                 }
 
-                let message = match array.remove(1) {
+                let message = match array[1].clone() {
                     Frame::Bulk(data) => data,
                     Frame::Simple(s) => Bytes::from(s),
                     _ => return Err("ECHO message must be a string".to_string()),

@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
                         info!("Loaded {} commands from AOF", frames.len());
                         // Replay commands to restore state
                         for frame in frames {
-                            if let Ok(cmd) = Command::from_frame(frame) {
+                            if let Ok(cmd) = Command::from_frame(&frame) {
                                 let _ = cmd.replay(&db);
                             }
                         }
@@ -190,7 +190,7 @@ async fn handle_connection(
         debug!("Received frame: {}", frame);
 
         // Parse the frame into a command
-        let command = match Command::from_frame(frame.clone()) {
+        let command = match Command::from_frame(&frame) {
             Ok(cmd) => cmd,
             Err(e) => {
                 error!("Failed to parse command: {}", e);
