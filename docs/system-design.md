@@ -186,10 +186,10 @@ Each key maps to a typed `Entry` containing a `Value` enum and optional expirati
 
 ```rust
 enum Value {
-    String(Bytes),           // Immutable byte buffer (zero-copy capable)
+    String(Bytes),           // Immutable, cheaply cloneable byte buffer
     List(VecDeque<Bytes>),   // Double-ended queue for O(1) push/pop
-    Set(HashSet<String>),    // Unordered unique membership
-    Hash(HashMap<String, Bytes>),  // Nested field-value pairs
+    Set(HashSet<Bytes>),     // Unordered unique membership (binary-safe)
+    Hash(HashMap<Bytes, Bytes>),   // Nested field-value pairs (binary-safe)
 }
 ```
 
@@ -197,10 +197,10 @@ enum Value {
 
 | Structure | Rust Type | Complexity | Why This Choice |
 |-----------|-----------|-----------|-----------------|
-| Strings | `Bytes` | O(1) clone | Reference-counted, zero-copy from network buffer |
+| Strings | `Bytes` | O(1) clone | Reference-counted; copied once out of the read buffer when parsed, cheap to clone after |
 | Lists | `VecDeque<Bytes>` | O(1) push/pop both ends | Matches Redis LPUSH/RPUSH/LPOP/RPOP semantics |
-| Sets | `HashSet<String>` | O(1) insert/contains | Matches Redis SADD/SISMEMBER semantics |
-| Hashes | `HashMap<String, Bytes>` | O(1) field access | Matches Redis HSET/HGET semantics |
+| Sets | `HashSet<Bytes>` | O(1) insert/contains | Matches Redis SADD/SISMEMBER semantics |
+| Hashes | `HashMap<Bytes, Bytes>` | O(1) field access | Matches Redis HSET/HGET semantics |
 
 ### 4.3 Comparison with Real Redis
 

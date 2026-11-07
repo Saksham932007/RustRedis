@@ -230,9 +230,9 @@ The `metrics.rs` module tracks cumulative lock wait time. To measure contention 
 
 ```rust
 // Conceptual instrumentation (in db.rs):
-pub fn write_string(&self, key: String, value: Bytes, expires_at: Option<Instant>) {
+pub fn write_string(&self, key: Bytes, value: Bytes, expires_at: Option<Instant>) {
     let lock_start = Instant::now();
-    let mut state = self.shared.lock().unwrap();
+    let mut state = self.shared.lock_recover();
     let lock_wait = lock_start.elapsed();
     // Report lock_wait to metrics
     
