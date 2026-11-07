@@ -4,6 +4,7 @@ use rust_redis::{
     command_metrics::{self, CommandMetricsCollector, MetricsStrategy, SharedCommandMetrics},
     connection::Connection,
     db::Db,
+    frame::Frame,
     metrics::{Metrics, SharedMetrics},
     persistence::{Aof, AofSyncPolicy},
     pubsub::PubSub,
@@ -178,13 +179,21 @@ async fn handle_connection(
     // Process commands in a loop
     loop {
         // Read a frame from the connection
-        let frame = match connection.read_frame().await? {
-            Some(frame) => frame,
-            None => {
+        let frame = match connection.read_frame().await {
+            Ok(Some(frame)) => frame,
+            Ok(None) => {
                 // Connection closed
                 debug!("Client disconnected");
                 return Ok(());
             }
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                // Malformed input: tell the client why, then drop the connection
+                warn!("Protocol error: {}", e);
+                let reply = Frame::error(format!("ERR Protocol error: {}", e));
+                let _ = connection.write_frame(&reply).await;
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
         };
 
         debug!("Received frame: {}", frame);
@@ -194,6 +203,12 @@ async fn handle_connection(
             Ok(cmd) => cmd,
             Err(e) => {
                 error!("Failed to parse command: {}", e);
+                let message = if e.starts_with("ERR") {
+                    e
+                } else {
+                    format!("ERR {}", e)
+                };
+                connection.write_frame(&Frame::error(message)).await?;
                 continue;
             }
         };
