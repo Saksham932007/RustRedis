@@ -313,6 +313,7 @@ fn sample_process_memory(start: Instant, label: &str) -> MemorySample {
 // Core Benchmark Runner
 // ============================================================================
 
+#[allow(clippy::too_many_arguments)]
 fn run_single_workload(
     host: &str,
     port: u16,
@@ -436,7 +437,7 @@ fn run_single_workload(
     };
 
     BenchmarkResult {
-        name: format!("{}", workload.display_name()),
+        name: workload.display_name().to_string(),
         concurrency,
         warmup_ops_per_client,
         measured_ops_per_client,

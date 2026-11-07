@@ -726,12 +726,8 @@ impl Command {
             Command::Publish { .. } => "PUBLISH",
             Command::Stats => "STATS",
             Command::CmdStat => "CMDSTAT",
-            Command::Unknown(name) => {
-                // Return a static str for common unknowns; otherwise "UNKNOWN"
-                match name.as_str() {
-                    _ => "UNKNOWN",
-                }
-            }
+            // Metrics need a 'static name, so all unknown commands share one label
+            Command::Unknown(_) => "UNKNOWN",
         }
     }
 
@@ -853,7 +849,7 @@ impl Command {
                 let keys = db.keys(pattern);
                 let response = Frame::Array(
                     keys.into_iter()
-                        .map(|k| Frame::Bulk(Bytes::from(k)))
+                        .map(Frame::Bulk)
                         .collect(),
                 );
                 dst.write_frame(&response).await?;
@@ -921,7 +917,7 @@ impl Command {
                     Frame::Array(
                         members
                             .into_iter()
-                            .map(|m| Frame::Bulk(Bytes::from(m)))
+                            .map(Frame::Bulk)
                             .collect(),
                     )
                 } else {
@@ -961,7 +957,7 @@ impl Command {
                 let response = if let Some(pairs) = db.hgetall(key) {
                     let mut result = Vec::new();
                     for (field, value) in pairs {
-                        result.push(Frame::Bulk(Bytes::from(field)));
+                        result.push(Frame::Bulk(field));
                         result.push(Frame::Bulk(value));
                     }
                     Frame::Array(result)
