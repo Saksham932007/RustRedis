@@ -16,7 +16,7 @@ authors:
     family-names: Kapoor
     email: sakshamkapoor810@gmail.com
     affiliation: "Independent Researcher, Delhi, India"
-    # orcid: "https://orcid.org/0000-0000-0000-0000"  # TODO: register at orcid.org and uncomment
+    orcid: "https://orcid.org/0009-0007-8164-6207"
 repository-code: "https://github.com/Saksham932007/RustRedis"
 license: MIT
 version: "1.0-paper"
