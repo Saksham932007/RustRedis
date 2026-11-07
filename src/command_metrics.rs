@@ -59,9 +59,9 @@ pub enum MetricsStrategy {
 }
 
 impl MetricsStrategy {
-    /// Parse from string (case-insensitive). Falls back to `Sharded2Key`.
-    pub fn from_str_loose(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
+    /// Parse from string (case-insensitive). Returns `None` for unknown names.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s.to_lowercase().as_str() {
             "disabled" | "none" | "off" => MetricsStrategy::Disabled,
             "global_mutex" | "globalmutex" | "mutex" => MetricsStrategy::GlobalMutex,
             "sharded" | "dashmap" | "sharded_2key" | "sharded2key" => {
@@ -82,8 +82,13 @@ impl MetricsStrategy {
             "hdr" | "hdrhistogram" | "hdr_histogram" | "histogram" => {
                 MetricsStrategy::HdrHistogram
             }
-            _ => MetricsStrategy::Sharded2Key,
-        }
+            _ => return None,
+        })
+    }
+
+    /// Parse from string (case-insensitive). Falls back to `Sharded2Key`.
+    pub fn from_str_loose(s: &str) -> Self {
+        Self::parse(s).unwrap_or(MetricsStrategy::Sharded2Key)
     }
 
     pub fn name(&self) -> &'static str {
@@ -1201,4 +1206,41 @@ pub fn start_thread_local_owned_flush_task(collector: Arc<ThreadLocalOwnedCollec
 /// Backward-compatible alias for existing server startup code.
 pub fn start_flush_task(collector: Arc<ThreadLocalBatchedCollector>) {
     start_thread_local_flush_task(collector);
+}
+
+#[cfg(test)]
+mod strategy_parse_tests {
+    use super::MetricsStrategy;
+
+    #[test]
+    fn known_names_parse_case_insensitively() {
+        assert_eq!(MetricsStrategy::parse("DISABLED"), Some(MetricsStrategy::Disabled));
+        assert_eq!(MetricsStrategy::parse("tls"), Some(MetricsStrategy::ThreadLocalBatched));
+        assert_eq!(MetricsStrategy::parse("hdr"), Some(MetricsStrategy::HdrHistogram));
+    }
+
+    #[test]
+    fn every_strategy_name_round_trips() {
+        for strategy in [
+            MetricsStrategy::Disabled,
+            MetricsStrategy::GlobalMutex,
+            MetricsStrategy::Sharded2Key,
+            MetricsStrategy::ShardedN,
+            MetricsStrategy::ShardedBucketed,
+            MetricsStrategy::ThreadLocalBatched,
+            MetricsStrategy::ThreadLocalOwned,
+            MetricsStrategy::HdrHistogram,
+        ] {
+            assert_eq!(MetricsStrategy::parse(strategy.name()), Some(strategy));
+        }
+    }
+
+    #[test]
+    fn typos_are_rejected_by_parse_but_tolerated_by_the_loose_parser() {
+        assert_eq!(MetricsStrategy::parse("globl_mutex"), None);
+        assert_eq!(
+            MetricsStrategy::from_str_loose("globl_mutex"),
+            MetricsStrategy::Sharded2Key
+        );
+    }
 }

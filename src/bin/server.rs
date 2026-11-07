@@ -44,9 +44,12 @@ async fn main() -> Result<()> {
     let aof_path = std::env::var("RUSTREDIS_AOF_PATH").unwrap_or_else(|_| "appendonly.aof".to_string());
 
     // Create per-command metrics collector
-    let strategy = std::env::var("RUSTREDIS_METRICS_STRATEGY")
-        .map(|s| MetricsStrategy::from_str_loose(&s))
-        .unwrap_or(MetricsStrategy::Sharded2Key);
+    let strategy = match std::env::var("RUSTREDIS_METRICS_STRATEGY") {
+        Ok(name) => MetricsStrategy::parse(&name).ok_or_else(|| {
+            anyhow::anyhow!("unknown RUSTREDIS_METRICS_STRATEGY '{}'", name)
+        })?,
+        Err(_) => MetricsStrategy::Sharded2Key,
+    };
     let command_metrics = CommandMetricsCollector::new(strategy);
     info!("Command metrics initialized (strategy: {})", strategy.name());
 

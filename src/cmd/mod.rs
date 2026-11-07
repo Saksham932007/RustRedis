@@ -1,6 +1,6 @@
 use crate::command_metrics::SharedCommandMetrics;
 use crate::connection::Connection;
-use crate::db::Db;
+use crate::store::Store;
 use crate::frame::Frame;
 use crate::metrics::SharedMetrics;
 use crate::pubsub::PubSub;
@@ -770,9 +770,9 @@ impl Command {
     }
 
     /// Execute the command and write the response to the connection
-    pub async fn execute(
+    pub async fn execute<S: Store>(
         &self,
-        db: &Db,
+        db: &S,
         dst: &mut Connection,
         pubsub: &PubSub,
         metrics: &SharedMetrics,
@@ -1031,7 +1031,7 @@ impl Command {
     }
 
     /// Replay a command without sending a response (for AOF restore)
-    pub fn replay(&self, db: &Db) -> Result<(), String> {
+    pub fn replay<S: Store>(&self, db: &S) -> Result<(), String> {
         match self {
             Command::Set {
                 key,
