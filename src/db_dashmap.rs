@@ -171,35 +171,33 @@ impl DbDashMap {
     }
 
     pub fn lrange(&self, key: &[u8], start: isize, stop: isize) -> Option<Vec<Bytes>> {
-        self.entries.get(key).and_then(|entry| {
-            match &entry.value {
-                Value::List(list) => {
-                    let len = list.len() as isize;
-                    let start = if start < 0 {
-                        (len + start).max(0)
-                    } else {
-                        start.min(len)
-                    } as usize;
-                    let stop = if stop < 0 {
-                        (len + stop).max(-1) + 1
-                    } else {
-                        (stop + 1).min(len)
-                    } as usize;
+        self.entries.get(key).and_then(|entry| match &entry.value {
+            Value::List(list) => {
+                let len = list.len() as isize;
+                let start = if start < 0 {
+                    (len + start).max(0)
+                } else {
+                    start.min(len)
+                } as usize;
+                let stop = if stop < 0 {
+                    (len + stop).max(-1) + 1
+                } else {
+                    (stop + 1).min(len)
+                } as usize;
 
-                    if start >= stop {
-                        Some(Vec::new())
-                    } else {
-                        Some(
-                            list.iter()
-                                .skip(start)
-                                .take(stop - start)
-                                .cloned()
-                                .collect(),
-                        )
-                    }
+                if start >= stop {
+                    Some(Vec::new())
+                } else {
+                    Some(
+                        list.iter()
+                            .skip(start)
+                            .take(stop - start)
+                            .cloned()
+                            .collect(),
+                    )
                 }
-                _ => None,
             }
+            _ => None,
         })
     }
 

@@ -208,9 +208,9 @@ impl RespClient {
 
 #[derive(Clone, Copy, Debug)]
 enum WorkloadType {
-    ReadHeavy,   // 80% GET, 20% SET
-    WriteHeavy,  // 80% SET, 20% GET
-    Mixed,       // 50% GET, 50% SET
+    ReadHeavy,  // 80% GET, 20% SET
+    WriteHeavy, // 80% SET, 20% GET
+    Mixed,      // 50% GET, 50% SET
 }
 
 impl WorkloadType {
@@ -331,10 +331,9 @@ fn run_single_workload(
     let warmup_ops_per_client = requests_per_client / 10;
     let measured_ops_per_client = requests_per_client.saturating_sub(warmup_ops_per_client);
 
-    let all_latencies: Arc<std::sync::Mutex<Vec<u64>>> =
-        Arc::new(std::sync::Mutex::new(Vec::with_capacity(
-            (concurrency as u64 * measured_ops_per_client) as usize,
-        )));
+    let all_latencies: Arc<std::sync::Mutex<Vec<u64>>> = Arc::new(std::sync::Mutex::new(
+        Vec::with_capacity((concurrency as u64 * measured_ops_per_client) as usize),
+    ));
 
     // Use OS threads for blocking I/O (TcpStream is synchronous)
     let mut handles = Vec::new();
@@ -457,12 +456,16 @@ fn run_single_workload(
 }
 
 fn mean(values: &[f64]) -> f64 {
-    if values.is_empty() { return 0.0; }
+    if values.is_empty() {
+        return 0.0;
+    }
     values.iter().sum::<f64>() / values.len() as f64
 }
 
 fn stddev(values: &[f64]) -> f64 {
-    if values.len() < 2 { return 0.0; }
+    if values.len() < 2 {
+        return 0.0;
+    }
     let m = mean(values);
     let variance = values.iter().map(|v| (v - m).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
     variance.sqrt()
@@ -620,9 +623,13 @@ async fn main() {
             };
             println!(
                 "{:>7.0} ± {:<5.0} ops/sec (CV={:.1}%) | p50={:.0}±{:.0}µs  p99={:.0}±{:.0}µs",
-                agg.ops_per_sec_mean, agg.ops_per_sec_stddev, cv,
-                agg.p50_us_mean, agg.p50_us_stddev,
-                agg.p99_us_mean, agg.p99_us_stddev,
+                agg.ops_per_sec_mean,
+                agg.ops_per_sec_stddev,
+                cv,
+                agg.p50_us_mean,
+                agg.p50_us_stddev,
+                agg.p99_us_mean,
+                agg.p99_us_stddev,
             );
 
             all_results.push(agg);
@@ -637,7 +644,10 @@ async fn main() {
 
     // ── Redis comparison (if requested) ─────────────────────────────────────
     if args.redis_port > 0 {
-        println!("\n━━━ Comparison: Real Redis (port {}) ━━━", args.redis_port);
+        println!(
+            "\n━━━ Comparison: Real Redis (port {}) ━━━",
+            args.redis_port
+        );
 
         // Test Redis connectivity
         match RespClient::connect(&args.host, args.redis_port) {
@@ -658,7 +668,10 @@ async fn main() {
             for &conc in &concurrency_levels {
                 print!(
                     "  [Redis] {:>5} clients × {:>7} ops × {} runs ({}) ... ",
-                    conc, args.requests, args.runs, workload.display_name()
+                    conc,
+                    args.requests,
+                    args.runs,
+                    workload.display_name()
                 );
                 std::io::stdout().flush().ok();
 
@@ -701,9 +714,13 @@ async fn main() {
                 };
                 println!(
                     "{:>7.0} ± {:<5.0} ops/sec (CV={:.1}%) | p50={:.0}±{:.0}µs  p99={:.0}±{:.0}µs",
-                    agg.ops_per_sec_mean, agg.ops_per_sec_stddev, cv,
-                    agg.p50_us_mean, agg.p50_us_stddev,
-                    agg.p99_us_mean, agg.p99_us_stddev,
+                    agg.ops_per_sec_mean,
+                    agg.ops_per_sec_stddev,
+                    cv,
+                    agg.p50_us_mean,
+                    agg.p50_us_stddev,
+                    agg.p99_us_mean,
+                    agg.p99_us_stddev,
                 );
 
                 all_results.push(agg);
@@ -718,7 +735,9 @@ async fn main() {
     if args.metrics_strategy != "none" {
         println!("\n━━━ Metrics Strategy Comparison ━━━");
         println!("Current server strategy: {}", args.metrics_strategy);
-        println!("  (restart server with RUSTREDIS_METRICS_STRATEGY=<strategy> for each comparison)");
+        println!(
+            "  (restart server with RUSTREDIS_METRICS_STRATEGY=<strategy> for each comparison)"
+        );
         println!();
 
         // Run a mixed workload at a single concurrency for the current strategy
@@ -753,8 +772,7 @@ async fn main() {
         let agg = aggregate_runs(run_results);
         println!(
             "{:>7.0} ± {:<5.0} ops/sec | p99={:.0}±{:.0}µs",
-            agg.ops_per_sec_mean, agg.ops_per_sec_stddev,
-            agg.p99_us_mean, agg.p99_us_stddev,
+            agg.ops_per_sec_mean, agg.ops_per_sec_stddev, agg.p99_us_mean, agg.p99_us_stddev,
         );
 
         // Fetch CMDSTAT from the server
@@ -821,9 +839,12 @@ fn write_results(
             "║ {:8} │ {:30} │ {:>8.0} ± {:<6.0} │ {:>6.0} ± {:<5.0} │ {:>6.0} ± {:<5.0} ║",
             format!("{}@c{}", r.target, r.concurrency),
             r.name,
-            r.ops_per_sec_mean, r.ops_per_sec_stddev,
-            r.p50_us_mean, r.p50_us_stddev,
-            r.p99_us_mean, r.p99_us_stddev,
+            r.ops_per_sec_mean,
+            r.ops_per_sec_stddev,
+            r.p50_us_mean,
+            r.p50_us_stddev,
+            r.p99_us_mean,
+            r.p99_us_stddev,
         );
     }
     println!("╚═══════════════════════════════════════════════════════════════════════════════════════════════════════╝");

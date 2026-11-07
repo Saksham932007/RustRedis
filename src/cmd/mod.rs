@@ -1,9 +1,9 @@
 use crate::command_metrics::SharedCommandMetrics;
 use crate::connection::Connection;
-use crate::store::Store;
 use crate::frame::Frame;
 use crate::metrics::SharedMetrics;
 use crate::pubsub::PubSub;
+use crate::store::Store;
 use bytes::Bytes;
 use std::io;
 use std::time::{Duration, Instant};
@@ -682,12 +682,8 @@ impl Command {
 
                 Ok(Command::Publish { channel, message })
             }
-            "STATS" | "INFO" => {
-                Ok(Command::Stats)
-            }
-            "CMDSTAT" | "CMDSTATS" => {
-                Ok(Command::CmdStat)
-            }
+            "STATS" | "INFO" => Ok(Command::Stats),
+            "CMDSTAT" | "CMDSTATS" => Ok(Command::CmdStat),
             _ => Ok(Command::Unknown(cmd_name)),
         }
     }
@@ -847,11 +843,7 @@ impl Command {
             Command::Keys { pattern } => {
                 // Get all keys matching a pattern
                 let keys = db.keys(pattern);
-                let response = Frame::Array(
-                    keys.into_iter()
-                        .map(Frame::Bulk)
-                        .collect(),
-                );
+                let response = Frame::Array(keys.into_iter().map(Frame::Bulk).collect());
                 dst.write_frame(&response).await?;
             }
             Command::LPush { key, values } => {
@@ -914,12 +906,7 @@ impl Command {
             Command::SMembers { key } => {
                 // Get all members of a set
                 let response = if let Some(members) = db.smembers(key) {
-                    Frame::Array(
-                        members
-                            .into_iter()
-                            .map(Frame::Bulk)
-                            .collect(),
-                    )
+                    Frame::Array(members.into_iter().map(Frame::Bulk).collect())
                 } else {
                     Frame::Array(Vec::new())
                 };

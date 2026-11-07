@@ -359,7 +359,10 @@ mod tests {
 
     #[test]
     fn parses_error() {
-        assert_eq!(parse(b"-ERR bad\r\n").unwrap(), Some(Frame::error("ERR bad")));
+        assert_eq!(
+            parse(b"-ERR bad\r\n").unwrap(),
+            Some(Frame::error("ERR bad"))
+        );
     }
 
     #[test]
@@ -474,13 +477,19 @@ mod tests {
         let at_limit = format!("${}\r\n", MAX_BULK_LEN);
         let over_limit = format!("${}\r\n", MAX_BULK_LEN + 1);
         assert!(parse(at_limit.as_bytes()).unwrap().is_none());
-        assert!(matches!(parse(over_limit.as_bytes()), Err(Error::Invalid(_))));
+        assert!(matches!(
+            parse(over_limit.as_bytes()),
+            Err(Error::Invalid(_))
+        ));
     }
 
     #[test]
     fn array_length_limit_is_enforced() {
         let over_limit = format!("*{}\r\n", MAX_ARRAY_LEN + 1);
-        assert!(matches!(parse(over_limit.as_bytes()), Err(Error::Invalid(_))));
+        assert!(matches!(
+            parse(over_limit.as_bytes()),
+            Err(Error::Invalid(_))
+        ));
     }
 
     fn nested(levels: usize) -> Vec<u8> {

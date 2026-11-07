@@ -1,235 +1,236 @@
-    use super::*;
-    use bytes::Bytes;
 
-    #[test]
-    fn test_string_operations() {
-        let db = Db::new();
+use super::*;
+use bytes::Bytes;
 
-        // Test write and read
-        db.write_string(Bytes::from("key1"), Bytes::from("value1"), None);
-        assert_eq!(
-            db.read_string(b"key1").unwrap(),
-            Bytes::from("value1")
-        );
+#[test]
+fn test_string_operations() {
+    let db = Db::new();
 
-        // Test non-existent key
-        assert!(db.read_string(b"nonexistent").is_none());
-    }
+    // Test write and read
+    db.write_string(Bytes::from("key1"), Bytes::from("value1"), None);
+    assert_eq!(db.read_string(b"key1").unwrap(), Bytes::from("value1"));
 
-    #[test]
-    fn test_list_operations() {
-        let db = Db::new();
+    // Test non-existent key
+    assert!(db.read_string(b"nonexistent").is_none());
+}
 
-        // Test LPUSH
-        // Values are reversed, so [a, b] becomes [b, a]
-        // Then b is pushed to front, then a is pushed to front
-        // Result: [a, b] (a at head)
-        let len = db.lpush(
-            Bytes::from("mylist"),
-            vec![Bytes::from("a"), Bytes::from("b")],
-        );
-        assert_eq!(len, 2);
+#[test]
+fn test_list_operations() {
+    let db = Db::new();
 
-        // Test RPUSH - adds to tail
-        let len = db.rpush(Bytes::from("mylist"), vec![Bytes::from("c")]);
-        assert_eq!(len, 3);
+    // Test LPUSH
+    // Values are reversed, so [a, b] becomes [b, a]
+    // Then b is pushed to front, then a is pushed to front
+    // Result: [a, b] (a at head)
+    let len = db.lpush(
+        Bytes::from("mylist"),
+        vec![Bytes::from("a"), Bytes::from("b")],
+    );
+    assert_eq!(len, 2);
 
-        // Test LRANGE - list is now [a, b, c]
-        let range = db.lrange(b"mylist", 0, -1).unwrap();
-        assert_eq!(range.len(), 3);
-        assert_eq!(range[0], Bytes::from("a"));
-        assert_eq!(range[1], Bytes::from("b"));
-        assert_eq!(range[2], Bytes::from("c"));
+    // Test RPUSH - adds to tail
+    let len = db.rpush(Bytes::from("mylist"), vec![Bytes::from("c")]);
+    assert_eq!(len, 3);
 
-        // Test LPOP - removes from head (a)
-        let value = db.lpop(b"mylist").unwrap();
-        assert_eq!(value, Bytes::from("a"));
+    // Test LRANGE - list is now [a, b, c]
+    let range = db.lrange(b"mylist", 0, -1).unwrap();
+    assert_eq!(range.len(), 3);
+    assert_eq!(range[0], Bytes::from("a"));
+    assert_eq!(range[1], Bytes::from("b"));
+    assert_eq!(range[2], Bytes::from("c"));
 
-        // Test LLEN - should have 2 items left
-        assert_eq!(db.llen(b"mylist").unwrap(), 2);
-    }
+    // Test LPOP - removes from head (a)
+    let value = db.lpop(b"mylist").unwrap();
+    assert_eq!(value, Bytes::from("a"));
 
-    #[test]
-    fn test_set_operations() {
-        let db = Db::new();
+    // Test LLEN - should have 2 items left
+    assert_eq!(db.llen(b"mylist").unwrap(), 2);
+}
 
-        // Test SADD
-        let added = db.sadd(
-            Bytes::from("myset"),
-            vec![Bytes::from("a"), Bytes::from("b"), Bytes::from("c")],
-        );
-        assert_eq!(added, 3);
+#[test]
+fn test_set_operations() {
+    let db = Db::new();
 
-        // Test SISMEMBER
-        assert!(db.sismember(b"myset", b"a"));
-        assert!(!db.sismember(b"myset", b"d"));
+    // Test SADD
+    let added = db.sadd(
+        Bytes::from("myset"),
+        vec![Bytes::from("a"), Bytes::from("b"), Bytes::from("c")],
+    );
+    assert_eq!(added, 3);
 
-        // Test SCARD
-        assert_eq!(db.scard(b"myset"), 3);
+    // Test SISMEMBER
+    assert!(db.sismember(b"myset", b"a"));
+    assert!(!db.sismember(b"myset", b"d"));
 
-        // Test SREM
-        let removed = db.srem(b"myset", vec![Bytes::from("b")]);
-        assert_eq!(removed, 1);
-        assert_eq!(db.scard(b"myset"), 2);
-    }
+    // Test SCARD
+    assert_eq!(db.scard(b"myset"), 3);
 
-    #[test]
-    fn test_hash_operations() {
-        let db = Db::new();
+    // Test SREM
+    let removed = db.srem(b"myset", vec![Bytes::from("b")]);
+    assert_eq!(removed, 1);
+    assert_eq!(db.scard(b"myset"), 2);
+}
 
-        // Test HSET
-        let is_new = db.hset(
-            Bytes::from("user:1"),
-            Bytes::from("name"),
-            Bytes::from("Alice"),
-        );
-        assert!(is_new);
+#[test]
+fn test_hash_operations() {
+    let db = Db::new();
 
-        // Test HGET
-        let value = db.hget(b"user:1", b"name").unwrap();
-        assert_eq!(value, Bytes::from("Alice"));
+    // Test HSET
+    let is_new = db.hset(
+        Bytes::from("user:1"),
+        Bytes::from("name"),
+        Bytes::from("Alice"),
+    );
+    assert!(is_new);
 
-        // Test HEXISTS
-        assert!(db.hexists(b"user:1", b"name"));
-        assert!(!db.hexists(b"user:1", b"age"));
+    // Test HGET
+    let value = db.hget(b"user:1", b"name").unwrap();
+    assert_eq!(value, Bytes::from("Alice"));
 
-        // Test HLEN
-        db.hset(Bytes::from("user:1"), Bytes::from("age"), Bytes::from("30"));
-        assert_eq!(db.hlen(b"user:1"), 2);
+    // Test HEXISTS
+    assert!(db.hexists(b"user:1", b"name"));
+    assert!(!db.hexists(b"user:1", b"age"));
 
-        // Test HDEL
-        let deleted = db.hdel(b"user:1", vec![Bytes::from("age")]);
-        assert_eq!(deleted, 1);
-        assert_eq!(db.hlen(b"user:1"), 1);
-    }
+    // Test HLEN
+    db.hset(Bytes::from("user:1"), Bytes::from("age"), Bytes::from("30"));
+    assert_eq!(db.hlen(b"user:1"), 2);
 
-    #[test]
-    fn test_utility_operations() {
-        let db = Db::new();
+    // Test HDEL
+    let deleted = db.hdel(b"user:1", vec![Bytes::from("age")]);
+    assert_eq!(deleted, 1);
+    assert_eq!(db.hlen(b"user:1"), 1);
+}
 
-        // Add some keys
-        db.write_string(Bytes::from("key1"), Bytes::from("val1"), None);
-        db.write_string(Bytes::from("key2"), Bytes::from("val2"), None);
-        db.lpush(Bytes::from("list1"), vec![Bytes::from("item")]);
+#[test]
+fn test_utility_operations() {
+    let db = Db::new();
 
-        // Test DBSIZE
-        assert_eq!(db.dbsize(), 3);
+    // Add some keys
+    db.write_string(Bytes::from("key1"), Bytes::from("val1"), None);
+    db.write_string(Bytes::from("key2"), Bytes::from("val2"), None);
+    db.lpush(Bytes::from("list1"), vec![Bytes::from("item")]);
 
-        // Test EXISTS
-        assert!(db.exists(b"key1"));
-        assert!(!db.exists(b"nonexistent"));
+    // Test DBSIZE
+    assert_eq!(db.dbsize(), 3);
 
-        // Test TYPE
-        assert_eq!(db.get_type(b"key1"), Some("string"));
-        assert_eq!(db.get_type(b"list1"), Some("list"));
-        assert_eq!(db.get_type(b"nonexistent"), None);
+    // Test EXISTS
+    assert!(db.exists(b"key1"));
+    assert!(!db.exists(b"nonexistent"));
 
-        // Test DEL
-        assert!(db.delete(b"key1"));
-        assert!(!db.delete(b"nonexistent"));
-        assert_eq!(db.dbsize(), 2);
+    // Test TYPE
+    assert_eq!(db.get_type(b"key1"), Some("string"));
+    assert_eq!(db.get_type(b"list1"), Some("list"));
+    assert_eq!(db.get_type(b"nonexistent"), None);
 
-        // Test FLUSHDB
-        db.flushdb();
-        assert_eq!(db.dbsize(), 0);
-    }
+    // Test DEL
+    assert!(db.delete(b"key1"));
+    assert!(!db.delete(b"nonexistent"));
+    assert_eq!(db.dbsize(), 2);
 
-    #[test]
-    fn test_keys_pattern_matching() {
-        let db = Db::new();
+    // Test FLUSHDB
+    db.flushdb();
+    assert_eq!(db.dbsize(), 0);
+}
 
-        // Add various keys
-        db.write_string(Bytes::from("user:1"), Bytes::from("a"), None);
-        db.write_string(Bytes::from("user:2"), Bytes::from("b"), None);
-        db.write_string(Bytes::from("session:1"), Bytes::from("c"), None);
-        db.write_string(Bytes::from("data"), Bytes::from("d"), None);
+#[test]
+fn test_keys_pattern_matching() {
+    let db = Db::new();
 
-        // Test wildcard pattern
-        let keys = db.keys("user:*");
-        assert_eq!(keys.len(), 2);
+    // Add various keys
+    db.write_string(Bytes::from("user:1"), Bytes::from("a"), None);
+    db.write_string(Bytes::from("user:2"), Bytes::from("b"), None);
+    db.write_string(Bytes::from("session:1"), Bytes::from("c"), None);
+    db.write_string(Bytes::from("data"), Bytes::from("d"), None);
 
-        // Test all keys
-        let all_keys = db.keys("*");
-        assert_eq!(all_keys.len(), 4);
+    // Test wildcard pattern
+    let keys = db.keys("user:*");
+    assert_eq!(keys.len(), 2);
 
-        // Test single char wildcard
-        let keys = db.keys("user:?");
-        assert_eq!(keys.len(), 2);
-    }
+    // Test all keys
+    let all_keys = db.keys("*");
+    assert_eq!(all_keys.len(), 4);
 
-    #[test]
-    fn test_expiration() {
-        let db = Db::new();
-        use std::time::{Duration, Instant};
+    // Test single char wildcard
+    let keys = db.keys("user:?");
+    assert_eq!(keys.len(), 2);
+}
 
-        // Set a key with 1 second expiration
-        let expires_at = Instant::now() + Duration::from_millis(100);
-        db.write_string(Bytes::from("temp"), Bytes::from("value"), Some(expires_at));
+#[test]
+fn test_expiration() {
+    let db = Db::new();
+    use std::time::{Duration, Instant};
 
-        // Should exist immediately
-        assert!(db.read_string(b"temp").is_some());
+    // Set a key with 1 second expiration
+    let expires_at = Instant::now() + Duration::from_millis(100);
+    db.write_string(Bytes::from("temp"), Bytes::from("value"), Some(expires_at));
 
-        // Wait for expiration
-        std::thread::sleep(Duration::from_millis(150));
+    // Should exist immediately
+    assert!(db.read_string(b"temp").is_some());
 
-        // Should be expired and return None
-        assert!(db.read_string(b"temp").is_none());
-    }
+    // Wait for expiration
+    std::thread::sleep(Duration::from_millis(150));
 
-    #[test]
-    fn test_type_safety() {
-        let db = Db::new();
+    // Should be expired and return None
+    assert!(db.read_string(b"temp").is_none());
+}
 
-        // Create a list
-        db.lpush(Bytes::from("mylist"), vec![Bytes::from("item")]);
+#[test]
+fn test_type_safety() {
+    let db = Db::new();
 
-        // Try to read as string - should return None
-        assert!(db.read_string(b"mylist").is_none());
+    // Create a list
+    db.lpush(Bytes::from("mylist"), vec![Bytes::from("item")]);
 
-        // Type should be "list"
-        assert_eq!(db.get_type(b"mylist"), Some("list"));
-    }
+    // Try to read as string - should return None
+    assert!(db.read_string(b"mylist").is_none());
 
-    #[test]
-    fn test_db_survives_a_panic_while_the_lock_is_held() {
-        let db = Db::new();
-        db.write_string(Bytes::from("key"), Bytes::from("value"), None);
+    // Type should be "list"
+    assert_eq!(db.get_type(b"mylist"), Some("list"));
+}
 
-        let poisoner = db.clone();
-        let result = std::thread::spawn(move || {
-            let _guard = poisoner.shared.lock().unwrap();
-            panic!("simulated bug while holding the keyspace lock");
-        })
-        .join();
-        assert!(result.is_err());
-        assert!(db.shared.is_poisoned());
+#[test]
+fn test_db_survives_a_panic_while_the_lock_is_held() {
+    let db = Db::new();
+    db.write_string(Bytes::from("key"), Bytes::from("value"), None);
 
-        // The database keeps serving requests instead of panicking forever
-        assert_eq!(db.read_string(b"key").unwrap(), Bytes::from("value"));
-        db.write_string(Bytes::from("other"), Bytes::from("x"), None);
-        assert_eq!(db.read_string(b"other").unwrap(), Bytes::from("x"));
-    }
+    let poisoner = db.clone();
+    let result = std::thread::spawn(move || {
+        let _guard = poisoner.shared.lock().unwrap();
+        panic!("simulated bug while holding the keyspace lock");
+    })
+    .join();
+    assert!(result.is_err());
+    assert!(db.shared.is_poisoned());
 
-    #[test]
-    fn test_binary_keys_members_and_fields() {
-        let db = Db::new();
-        let key: &[u8] = b"\xff\xfe\x00key";
+    // The database keeps serving requests instead of panicking forever
+    assert_eq!(db.read_string(b"key").unwrap(), Bytes::from("value"));
+    db.write_string(Bytes::from("other"), Bytes::from("x"), None);
+    assert_eq!(db.read_string(b"other").unwrap(), Bytes::from("x"));
+}
 
-        db.write_string(Bytes::copy_from_slice(key), Bytes::from("v"), None);
-        assert_eq!(db.read_string(key).unwrap(), Bytes::from("v"));
-        assert!(db.exists(key));
+#[test]
+fn test_binary_keys_members_and_fields() {
+    let db = Db::new();
+    let key: &[u8] = b"\xff\xfe\x00key";
 
-        db.sadd(Bytes::from("set"), vec![Bytes::copy_from_slice(b"\x80\x81")]);
-        assert!(db.sismember(b"set", b"\x80\x81"));
+    db.write_string(Bytes::copy_from_slice(key), Bytes::from("v"), None);
+    assert_eq!(db.read_string(key).unwrap(), Bytes::from("v"));
+    assert!(db.exists(key));
 
-        db.hset(
-            Bytes::from("hash"),
-            Bytes::copy_from_slice(b"\xc3\x28"),
-            Bytes::from("x"),
-        );
-        assert_eq!(db.hget(b"hash", b"\xc3\x28").unwrap(), Bytes::from("x"));
+    db.sadd(
+        Bytes::from("set"),
+        vec![Bytes::copy_from_slice(b"\x80\x81")],
+    );
+    assert!(db.sismember(b"set", b"\x80\x81"));
 
-        assert!(db.keys("*").contains(&Bytes::copy_from_slice(key)));
-        assert!(db.delete(key));
-        assert!(!db.exists(key));
-    }
+    db.hset(
+        Bytes::from("hash"),
+        Bytes::copy_from_slice(b"\xc3\x28"),
+        Bytes::from("x"),
+    );
+    assert_eq!(db.hget(b"hash", b"\xc3\x28").unwrap(), Bytes::from("x"));
+
+    assert!(db.keys("*").contains(&Bytes::copy_from_slice(key)));
+    assert!(db.delete(key));
+    assert!(!db.exists(key));
+}

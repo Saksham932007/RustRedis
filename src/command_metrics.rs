@@ -64,24 +64,18 @@ impl MetricsStrategy {
         Some(match s.to_lowercase().as_str() {
             "disabled" | "none" | "off" => MetricsStrategy::Disabled,
             "global_mutex" | "globalmutex" | "mutex" => MetricsStrategy::GlobalMutex,
-            "sharded" | "dashmap" | "sharded_2key" | "sharded2key" => {
-                MetricsStrategy::Sharded2Key
-            }
+            "sharded" | "dashmap" | "sharded_2key" | "sharded2key" => MetricsStrategy::Sharded2Key,
             "sharded_n" | "shardedn" | "sharded_full" | "sharded_full_key" => {
                 MetricsStrategy::ShardedN
             }
-            "sharded_bucketed" | "shardedbucketed" | "bucketed" => {
-                MetricsStrategy::ShardedBucketed
-            }
+            "sharded_bucketed" | "shardedbucketed" | "bucketed" => MetricsStrategy::ShardedBucketed,
             "thread_local_owned" | "threadlocalowned" | "tls_owned" => {
                 MetricsStrategy::ThreadLocalOwned
             }
             "thread_local" | "threadlocal" | "thread_local_batched" | "tls" => {
                 MetricsStrategy::ThreadLocalBatched
             }
-            "hdr" | "hdrhistogram" | "hdr_histogram" | "histogram" => {
-                MetricsStrategy::HdrHistogram
-            }
+            "hdr" | "hdrhistogram" | "hdr_histogram" | "histogram" => MetricsStrategy::HdrHistogram,
             _ => return None,
         })
     }
@@ -1004,9 +998,11 @@ impl CommandMetricsCollector {
 
     pub fn lock_wait_us(&self) -> u64 {
         match self.strategy {
-            MetricsStrategy::GlobalMutex => {
-                self.global_mutex.as_ref().map(|c| c.lock_wait_us()).unwrap_or(0)
-            }
+            MetricsStrategy::GlobalMutex => self
+                .global_mutex
+                .as_ref()
+                .map(|c| c.lock_wait_us())
+                .unwrap_or(0),
             _ => 0,
         }
     }
@@ -1064,7 +1060,10 @@ impl CommandMetricsCollector {
             let per_shard_calls = collector.shard_call_distribution();
 
             output.push_str("\r\n# Sharded2Key\r\n");
-            output.push_str(&format!("sharded_2key_shard_count:{}\r\n", METRICS_SHARD_COUNT));
+            output.push_str(&format!(
+                "sharded_2key_shard_count:{}\r\n",
+                METRICS_SHARD_COUNT
+            ));
             output.push_str(&format!("sharded_2key_get_shard:{}\r\n", get_shard));
             output.push_str(&format!("sharded_2key_set_shard:{}\r\n", set_shard));
             for (idx, calls) in per_shard_calls.iter().enumerate() {
@@ -1077,7 +1076,10 @@ impl CommandMetricsCollector {
             let nonempty = dist.iter().filter(|(keys, _)| *keys > 0).count();
 
             output.push_str("\r\n# ShardedN\r\n");
-            output.push_str(&format!("sharded_n_shard_count:{}\r\n", METRICS_SHARD_COUNT));
+            output.push_str(&format!(
+                "sharded_n_shard_count:{}\r\n",
+                METRICS_SHARD_COUNT
+            ));
             output.push_str(&format!("sharded_n_nonempty_shards:{}\r\n", nonempty));
             for (idx, (keys, calls)) in dist.iter().enumerate() {
                 output.push_str(&format!("sharded_n_shard_{}_keys:{}\r\n", idx, keys));
@@ -1214,9 +1216,18 @@ mod strategy_parse_tests {
 
     #[test]
     fn known_names_parse_case_insensitively() {
-        assert_eq!(MetricsStrategy::parse("DISABLED"), Some(MetricsStrategy::Disabled));
-        assert_eq!(MetricsStrategy::parse("tls"), Some(MetricsStrategy::ThreadLocalBatched));
-        assert_eq!(MetricsStrategy::parse("hdr"), Some(MetricsStrategy::HdrHistogram));
+        assert_eq!(
+            MetricsStrategy::parse("DISABLED"),
+            Some(MetricsStrategy::Disabled)
+        );
+        assert_eq!(
+            MetricsStrategy::parse("tls"),
+            Some(MetricsStrategy::ThreadLocalBatched)
+        );
+        assert_eq!(
+            MetricsStrategy::parse("hdr"),
+            Some(MetricsStrategy::HdrHistogram)
+        );
     }
 
     #[test]

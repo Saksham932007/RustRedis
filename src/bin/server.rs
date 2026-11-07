@@ -39,7 +39,10 @@ async fn main() -> Result<()> {
             info!("Keyspace store: dashmap");
             serve::<DbDashMap>().await
         }
-        other => anyhow::bail!("unknown RUSTREDIS_STORE '{}' (expected 'mutex' or 'dashmap')", other),
+        other => anyhow::bail!(
+            "unknown RUSTREDIS_STORE '{}' (expected 'mutex' or 'dashmap')",
+            other
+        ),
     }
 }
 
@@ -62,17 +65,20 @@ async fn serve<S: Store>() -> Result<()> {
             normalized == "1" || normalized == "true" || normalized == "yes"
         })
         .unwrap_or(false);
-    let aof_path = std::env::var("RUSTREDIS_AOF_PATH").unwrap_or_else(|_| "appendonly.aof".to_string());
+    let aof_path =
+        std::env::var("RUSTREDIS_AOF_PATH").unwrap_or_else(|_| "appendonly.aof".to_string());
 
     // Create per-command metrics collector
     let strategy = match std::env::var("RUSTREDIS_METRICS_STRATEGY") {
-        Ok(name) => MetricsStrategy::parse(&name).ok_or_else(|| {
-            anyhow::anyhow!("unknown RUSTREDIS_METRICS_STRATEGY '{}'", name)
-        })?,
+        Ok(name) => MetricsStrategy::parse(&name)
+            .ok_or_else(|| anyhow::anyhow!("unknown RUSTREDIS_METRICS_STRATEGY '{}'", name))?,
         Err(_) => MetricsStrategy::Sharded2Key,
     };
     let command_metrics = CommandMetricsCollector::new(strategy);
-    info!("Command metrics initialized (strategy: {})", strategy.name());
+    info!(
+        "Command metrics initialized (strategy: {})",
+        strategy.name()
+    );
 
     // Start background flush task for ThreadLocalBatched strategy
     if let Some(tl_collector) = command_metrics.thread_local_collector() {
@@ -139,7 +145,8 @@ async fn serve<S: Store>() -> Result<()> {
     };
 
     // Bind the TCP listener (defaults to the Redis port on loopback)
-    let bind_addr = std::env::var("RUSTREDIS_BIND").unwrap_or_else(|_| "127.0.0.1:6379".to_string());
+    let bind_addr =
+        std::env::var("RUSTREDIS_BIND").unwrap_or_else(|_| "127.0.0.1:6379".to_string());
     let listener = TcpListener::bind(&bind_addr).await?;
 
     info!("RustRedis server listening on {}", listener.local_addr()?);

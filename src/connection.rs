@@ -162,14 +162,20 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let (client, accepted) = tokio::join!(TcpStream::connect(addr), listener.accept());
         let (socket, _) = accepted.unwrap();
-        (Connection::with_max_buffer(socket, max_buffer), client.unwrap())
+        (
+            Connection::with_max_buffer(socket, max_buffer),
+            client.unwrap(),
+        )
     }
 
     #[tokio::test]
     async fn reads_a_frame() {
         let (mut conn, mut client) = pair(1024).await;
         client.write_all(b"+PONG\r\n").await.unwrap();
-        assert_eq!(conn.read_frame().await.unwrap(), Some(Frame::simple("PONG")));
+        assert_eq!(
+            conn.read_frame().await.unwrap(),
+            Some(Frame::simple("PONG"))
+        );
     }
 
     #[tokio::test]
