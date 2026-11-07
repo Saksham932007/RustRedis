@@ -5,6 +5,12 @@ use std::io::{self, Cursor};
 /// Maximum nesting depth of arrays, matching the limit Redis applies.
 const MAX_DEPTH: usize = 128;
 
+/// Maximum bulk string length (512 MB, Redis' `proto-max-bulk-len` default).
+const MAX_BULK_LEN: usize = 512 * 1024 * 1024;
+
+/// Maximum number of elements in an array (Redis' multibulk limit).
+const MAX_ARRAY_LEN: usize = 1024 * 1024;
+
 /// Error type for frame parsing
 #[derive(Debug)]
 pub enum Error {
@@ -142,7 +148,7 @@ fn check_complete(cursor: &mut Cursor<&[u8]>, depth: usize) -> Result<(), Error>
         b':' => read_until_crlf(cursor), // Integer
         b'$' => {
             // Bulk String
-            match read_length(cursor, "bulk")? {
+            match read_length(cursor, "bulk", MAX_BULK_LEN)? {
                 // Null bulk string
                 None => Ok(()),
                 // Skip len bytes + \r\n
@@ -151,7 +157,7 @@ fn check_complete(cursor: &mut Cursor<&[u8]>, depth: usize) -> Result<(), Error>
         }
         b'*' => {
             // Array
-            match read_length(cursor, "array")? {
+            match read_length(cursor, "array", MAX_ARRAY_LEN)? {
                 // Null array (not standard but handle it)
                 None => Ok(()),
                 // Recursively check each element
@@ -194,7 +200,7 @@ fn parse_frame(cursor: &mut Cursor<&[u8]>, depth: usize) -> Result<Frame, Error>
             let num = read_decimal(cursor)?;
             Ok(Frame::Integer(num))
         }
-        b'$' => match read_length(cursor, "bulk")? {
+        b'$' => match read_length(cursor, "bulk", MAX_BULK_LEN)? {
             None => Ok(Frame::Null),
             Some(len) => {
                 let data = read_n_bytes(cursor, len)?;
@@ -202,7 +208,7 @@ fn parse_frame(cursor: &mut Cursor<&[u8]>, depth: usize) -> Result<Frame, Error>
                 Ok(Frame::Bulk(Bytes::copy_from_slice(data)))
             }
         },
-        b'*' => match read_length(cursor, "array")? {
+        b'*' => match read_length(cursor, "array", MAX_ARRAY_LEN)? {
             None => Ok(Frame::Null),
             Some(_) if depth >= MAX_DEPTH => Err(too_deep()),
             Some(count) => {
@@ -267,13 +273,15 @@ fn read_decimal(cursor: &mut Cursor<&[u8]>) -> Result<i64, Error> {
 }
 
 /// Read a length prefix. `-1` means null and yields `None`; any other
-/// negative value is a protocol error.
-fn read_length(cursor: &mut Cursor<&[u8]>, what: &str) -> Result<Option<usize>, Error> {
+/// negative value, or one above `max`, is a protocol error.
+fn read_length(cursor: &mut Cursor<&[u8]>, what: &str, max: usize) -> Result<Option<usize>, Error> {
     match read_decimal(cursor)? {
         -1 => Ok(None),
         n => usize::try_from(n)
+            .ok()
+            .filter(|&len| len <= max)
             .map(Some)
-            .map_err(|_| Error::Invalid(format!("invalid {} length: {}", what, n))),
+            .ok_or_else(|| Error::Invalid(format!("invalid {} length: {}", what, n))),
     }
 }
 
@@ -449,9 +457,29 @@ mod tests {
     }
 
     #[test]
-    fn length_near_usize_max_does_not_overflow() {
-        assert!(parse(b"$9223372036854775807\r\n").is_ok());
-        assert!(parse(b"*9223372036854775807\r\n").is_ok());
+    fn length_near_i64_max_is_rejected_not_overflowed() {
+        assert!(matches!(
+            parse(b"$9223372036854775807\r\n"),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            parse(b"*9223372036854775807\r\n"),
+            Err(Error::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn bulk_length_limit_is_enforced() {
+        let at_limit = format!("${}\r\n", MAX_BULK_LEN);
+        let over_limit = format!("${}\r\n", MAX_BULK_LEN + 1);
+        assert!(parse(at_limit.as_bytes()).unwrap().is_none());
+        assert!(matches!(parse(over_limit.as_bytes()), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn array_length_limit_is_enforced() {
+        let over_limit = format!("*{}\r\n", MAX_ARRAY_LEN + 1);
+        assert!(matches!(parse(over_limit.as_bytes()), Err(Error::Invalid(_))));
     }
 
     fn nested(levels: usize) -> Vec<u8> {
