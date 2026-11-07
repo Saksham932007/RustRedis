@@ -1,6 +1,4 @@
-#[cfg(test)]
-mod tests {
-    use super::super::*;
+    use super::*;
     use bytes::Bytes;
 
     #[test]
@@ -235,4 +233,3 @@ mod tests {
         assert!(db.delete(key));
         assert!(!db.exists(key));
     }
-}
