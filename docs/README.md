@@ -27,6 +27,8 @@ Supporting documents:
   manuscript and reports its own earlier storage-backend and AOF benchmarks;
   for anything about observability-overhead magnitudes the manuscript is
   authoritative
+- [limitations.md](limitations.md): what the server does not do (lazy-only expiry,
+  single database, no clustering, `KEYS` scans) and what the measurements do not cover
 - [failure-analysis.md](failure-analysis.md): crash-recovery, partial-write and
   contention failure modes of the server — orthogonal to the manuscript's
   measurements, except for the open-FD failure the paper records in §4.4
