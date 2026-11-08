@@ -331,6 +331,12 @@ executions. See [docs/REVIEW_RESPONSE.md](docs/REVIEW_RESPONSE.md).
 4. Optional persistence appends to AOF.
 5. Telemetry path updates command metrics via the selected collector.
 
+**Provenance.** The server core (`frame.rs`, `connection.rs`, `db.rs`, `cmd/mod.rs`)
+follows the structure and naming of Tokio's [mini-redis](https://github.com/tokio-rs/mini-redis)
+(MIT): the `Frame` type, `Connection::read_frame`/`write_frame`, and the `Db` and
+command-module split. The metrics subsystem, the load generator and the experimental
+design are original to this project.
+
 Worker count is the Tokio default, so **the number of OS threads that can concurrently
 enter the metrics path equals the vCPU count** regardless of client count — the property
 finding 2 exploits.
