@@ -12,6 +12,10 @@ measurement; see [Caveats](#caveats).)
 
 ## Paper & reproducibility
 
+**To evaluate or cite the paper's artifact, use the `v1.0-paper` tag (DOI
+[10.5281/zenodo.23295261](https://doi.org/10.5281/zenodo.23295261)); `main` may contain
+post-publication changes.**
+
 Full write-up: **[docs/final_paper_v27.md](docs/final_paper_v27.md)** — *"Cardinality
 Before Contention"*, prepared for submission to *Software: Practice and Experience*.
 
