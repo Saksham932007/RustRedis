@@ -394,6 +394,10 @@ Core modules:
 
 ## Caveats
 
+The known limitations of the server itself (lazy-only expiry, single database, no
+clustering, `KEYS` scanning under the lock) are in [docs/limitations.md](docs/limitations.md).
+The measurement caveats follow.
+
 - One VM family, one x86-64 OS image: replicated across VM size, instance, region and
   workload, but not across clouds or hardware families.
 - Client and server share the machine; at the highest concurrency this is a genuine
