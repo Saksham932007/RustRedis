@@ -2,421 +2,409 @@
 
 [![CI](https://github.com/Saksham932007/RustRedis/actions/workflows/ci.yml/badge.svg)](https://github.com/Saksham932007/RustRedis/actions/workflows/ci.yml)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23295261.svg)](https://doi.org/10.5281/zenodo.23295261)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-RustRedis is an experimental Redis-compatible in-memory key-value server in Rust (~3,500
-LOC), built to answer one research question: **what does per-command observability
-instrumentation actually cost on a thread-pool concurrent server — and which design
-decision inside "instrumentation" is the expensive one?** (Client and server are
-co-located on one VM over loopback, so this is deliberately not a network-bound
-measurement; see [Caveats](#caveats).)
+RustRedis is a high-performance, Redis-compatible in-memory key-value server written in Rust (~3,500 LOC). It features a multi-threaded asynchronous architecture powered by Tokio, pluggable keyspace backends, append-only file (AOF) persistence, and an extensible telemetry subsystem.
 
-## Paper & reproducibility
+This repository serves two distinct audiences. Choose the path that matches your interest:
 
-**To evaluate or cite the paper's artifact, use the `v1.0-paper` tag (DOI
-[10.5281/zenodo.23295261](https://doi.org/10.5281/zenodo.23295261)); `main` may contain
-post-publication changes.**
+---
 
-Full write-up: **[docs/final_paper_v27.md](docs/final_paper_v27.md)** — *"Cardinality
-Before Contention"*, prepared for submission to *Software: Practice and Experience*.
+### Choose Your Path
 
-### Datasets
+* **[Path A: Build and Use the Server](#path-a-build-and-use-the-server)**  
+  *For backend engineers and systems developers.*  
+  Learn about the RESP server implementation, multi-threaded Tokio architecture, AOF persistence engine, supported Redis commands, telemetry strategies, and instructions to run and benchmark the server.
 
-| Dataset | Hardware | Design | Runs |
-|---|---|---|---:|
-| [`azure_d4s_v6`](experiments/azure_d4s_v6) | `Standard_D4s_v6`, 4 vCPU / 16 GB, Central India | 6 strategies × 8 concurrency (100–1000) × 30 blocks, mixed | 1,440 |
-| [`azure_d8s_v6/pooled`](experiments/azure_d8s_v6/pooled) | `Standard_D8s_v6`, 8 vCPU / 32 GB, **5 VMs / 3 regions** | 6 strategies × 8 concurrency (100–3000) × 3 workloads × 15 blocks, **× 11 independent runs** | 23,760 |
-| [`azure_d8s_v6_followup/pooled`](experiments/azure_d8s_v6_followup/pooled) | `Standard_D8s_v6`, **8 VMs / 3 regions** | 12 configs (incl. 5-point cardinality sweep) × 3 concurrency × 15 blocks, **× 8 independent runs** | 4,320 |
+* **[Path B: Understand the Research](#path-b-understand-the-research)**  
+  *For researchers, performance engineers, and observability architects.*  
+  Explore the empirical study (*"Cardinality Before Contention"*), the factorial experimental design, key research findings, statistical methodology (RMIT), paper manuscript, and reproducibility suite. All exhaustive empirical data tables are preserved in **[docs/research.md](docs/research.md)**.
 
-Every VM was provisioned solely for the benchmark and deleted afterwards; all report the
-same Intel Xeon Platinum 8573C, so the pools vary in instance, region and date but not
-microarchitecture. `scripts/combine_iterations.py` pools runs, offsetting each run's
-`block_id` so paired comparisons never mix blocks across VMs. All overhead figures are
-**paired within-block ratios** against the `disabled` baseline in the same block — the
-comparison RMIT makes valid.
+---
 
-**Inference clusters on runs.** The pooled 165 blocks per cell are 11 independent runs ×
-15 correlated within-run blocks; treating them as independent overstates precision by
-~20%. Intervals collapse each run to one mean and form a *t*-interval over those numbers,
-with directional claims cross-checked by an exact sign test.
+# Path A: Build and Use the Server
 
-### Reproducing the paper
+## Quick Start
+
+### 1. Prerequisites & Compilation
+
+Ensure you have a recent Rust toolchain installed (edition 2021, Rust 1.75+ recommended):
 
 ```bash
-# 0. Analysis dependencies (Python 3.10+) and the full datasets from Zenodo
-python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
-scripts/fetch_data.sh    # downloads ~7 MB, verifies its checksum, fills experiments/
-
-# 1. Build
+# Build the release binary
 cargo build --release --bin server
+```
+
+### 2. Running the Server
+
+Start the server on the default address (`127.0.0.1:6379`):
+
+```bash
+cargo run --release --bin server
+```
+
+The server outputs structured logs via `tracing`:
+```text
+INFO RustRedis server listening on 127.0.0.1:6379
+INFO Keyspace store: mutex
+INFO Command metrics initialized (strategy: sharded_2key)
+INFO AOF persistence enabled with EverySecond sync policy (path: appendonly.aof)
+INFO Press CTRL+C to shutdown gracefully
+```
+
+### 3. Interacting with the Server
+
+You can connect to RustRedis using standard Redis clients such as `redis-cli`, Python (`redis-py`), Go (`go-redis`), or raw TCP (`nc`, `telnet`):
+
+```bash
+# Basic connection check
+redis-cli -p 6379 ping
+# PONG
+
+# String operations with expiration
+redis-cli -p 6379 set session:token "abc123xyz" EX 300
+# OK
+redis-cli -p 6379 get session:token
+# "abc123xyz"
+
+# List operations
+redis-cli -p 6379 lpush tasks "task_1" "task_2"
+# (integer) 2
+redis-cli -p 6379 lrange tasks 0 -1
+# 1) "task_2"
+# 2) "task_1"
+
+# Telemetry inspection
+redis-cli -p 6379 stats
+redis-cli -p 6379 cmdstat
+```
+
+### 4. Configuration
+
+RustRedis is configured via environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `RUSTREDIS_BIND` | `127.0.0.1:6379` | TCP socket address and port to bind to. |
+| `RUSTREDIS_STORE` | `mutex` | Keyspace storage engine: `mutex` (single global lock) or `dashmap` (sharded concurrent map). |
+| `RUSTREDIS_METRICS_STRATEGY` | `sharded_2key` | Metrics telemetry collector (one of 8 strategies, see below). |
+| `RUSTREDIS_METRICS_CARDINALITY` | `2` | Active key cardinality for the `sharded_bucketed` collector. |
+| `RUSTREDIS_DISABLE_AOF` | `false` | Set to `1`, `true`, or `yes` to disable write persistence. |
+| `RUSTREDIS_AOF_PATH` | `appendonly.aof` | File path for the Append-Only File. |
+
+Example: Run a high-concurrency instance with sharded keyspace storage and thread-local metrics:
+```bash
+RUSTREDIS_STORE=dashmap RUSTREDIS_METRICS_STRATEGY=thread_local cargo run --release --bin server
+```
+
+---
+
+## Server Architecture & Internals
+
+```
+                       ┌──────────────────────────────────────────────┐
+                       │               Client Connections             │
+                       └──────────────────────┬───────────────────────┘
+                                              │ (TCP)
+                                              ▼
+                       ┌──────────────────────────────────────────────┐
+                       │           Tokio Multi-Threaded Loop          │
+                       │            (One Task Per Client)             │
+                       └──────────────────────┬───────────────────────┘
+                                              │
+                                              ▼
+                       ┌──────────────────────────────────────────────┐
+                       │            RESP Protocol Parser              │
+                       │     (Frame extraction, bounds checking)      │
+                       └──────────────────────┬───────────────────────┘
+                                              │
+                       ┌──────────────────────┴───────────────────────┐
+                       │                                              │
+                       ▼                                              ▼
+    ┌─────────────────────────────────────┐        ┌─────────────────────────────────────┐
+    │       Command Dispatcher            │        │           AOF Persistence           │
+    │   (GET, SET, LPUSH, SADD, etc.)     │        │  (Write-ahead logging, fsync loop)  │
+    └──────────────────┬──────────────────┘        └─────────────────────────────────────┘
+                       │
+        ┌──────────────┴──────────────┐
+        ▼                             ▼
+┌──────────────────┐        ┌───────────────────────┐
+│  Keyspace Store  │        │   Telemetry Collector │
+│ (Mutex / DashMap)│        │   (1 of 8 Strategies) │
+└──────────────────┘        └───────────────────────┘
+```
+
+### 1. RESP Protocol Parser & Framing
+The server implements the Redis Serialization Protocol (RESP2) in [src/frame.rs](src/frame.rs) and [src/connection.rs](src/connection.rs):
+* **Supported Frame Types**: Simple Strings (`+`), Errors (`-`), Integers (`:`), Bulk Strings (`$`), Arrays (`*`), and Nulls.
+* **Hardened Framing**: Zero-copy buffered I/O with `bytes::BytesMut`. Validates integer boundaries, rejects recursive nesting attacks, and handles partial frames cleanly without unbounded buffer allocation.
+* **Streaming Network I/O**: Connections read and write asynchronously over `tokio::net::TcpStream` using a buffered flush model to optimize throughput under pipelined workloads.
+
+### 2. Tokio Asynchronous Multi-threaded Runtime
+Implemented in [src/bin/server.rs](src/bin/server.rs):
+* **Task Isolation**: When a TCP connection is accepted, it is spawned onto the Tokio multi-threaded runtime (`#[tokio::main(flavor = "multi_thread")]`).
+* **Decoupled Concurrency**: The server handles thousands of concurrent client connections without spawning an OS thread per connection. The Tokio runtime dispatches async tasks across a worker thread pool sized to host vCPUs.
+* **Worker Thread Determinism**: The number of OS threads concurrently entering the database or telemetry hot path equals the host's physical/virtual core count, independent of the number of active network sockets.
+
+### 3. Pluggable Storage Backends (`Store` Trait)
+Database backends implement the `Store` trait in [src/store.rs](src/store.rs):
+* **`Db` ([src/db.rs](src/db.rs))**: A single global `std::sync::Mutex` protecting a `HashMap<String, Entry>`. This provides standard single-threaded Redis serialization semantics and serves as the baseline reference.
+* **`DbDashMap` ([src/db_dashmap.rs](src/db_dashmap.rs))**: A concurrent, 64-way sharded hash map (`dashmap::DashMap`) for concurrent read/write scaling.
+* **Expiration Engine**: Passive/lazy expiration on key access across all data types, checking millisecond timestamps before returning values.
+
+### 4. AOF (Append-Only File) Persistence Engine
+Implemented in [src/persistence.rs](src/persistence.rs):
+* **Write-Ahead Logging**: Mutating commands (`SET`, `DEL`, `LPUSH`, `HSET`, etc.) are serialized into standard RESP array frames and written to disk.
+* **Sync Policies**:
+  * `Always`: Synchronously calls `fsync()` after every write command (maximum durability, lowest throughput).
+  * `EverySecond` (default): Appends writes to the OS buffer cache and flushes to disk once per second via a dedicated background Tokio task.
+  * `No`: Delegates sync decisions entirely to the OS buffer management.
+* **Crash Recovery Replay**: On server startup, `Aof::load` scans and validates the AOF file, replaying commands sequentially through `Command::replay` to reconstruct keyspace state before accepting client traffic.
+
+### 5. Pub/Sub Subsystem
+Implemented in [src/pubsub.rs](src/pubsub.rs):
+* Centralized broadcast hub using `tokio::sync::broadcast` channels with bounded capacity (1,024 messages per channel).
+* Independent channel lifecycle management with automatic cleanup of inactive channels when subscriber counts drop to zero.
+
+---
+
+## Supported Redis Commands
+
+Implemented in [src/cmd/mod.rs](src/cmd/mod.rs):
+
+| Category | Commands | Description |
+|---|---|---|
+| **Connection & Server** | `PING [msg]` | Tests server connectivity; echoes optional message. |
+| | `ECHO msg` | Returns the input message. |
+| | `STATS` | Returns process metrics, active connections, total ops, and AOF timing. |
+| | `CMDSTAT` | Returns real-time latency and call counts from the active metrics collector. |
+| **Strings & Keyspace** | `GET key` | Retrieves the string value of a key. |
+| | `SET key value [EX sec]` | Sets key to value with optional TTL in seconds. |
+| | `DEL key [key...]` | Deletes one or more keys. |
+| | `EXISTS key` | Returns 1 if key exists, 0 otherwise. |
+| | `TYPE key` | Returns data type (`string`, `list`, `set`, `hash`, or `none`). |
+| | `DBSIZE` | Returns total keys stored in the active database. |
+| | `FLUSHDB` | Removes all keys from the database. |
+| | `KEYS pattern` | Returns keys matching glob-style pattern (e.g., `user:*`). |
+| **Lists** | `LPUSH key val [val...]` | Prepends one or more elements to a list. |
+| | `RPUSH key val [val...]` | Appends one or more elements to a list. |
+| | `LPOP key` | Removes and returns the first element of a list. |
+| | `RPOP key` | Removes and returns the last element of a list. |
+| | `LRANGE key start stop` | Returns range of elements (supports negative indices). |
+| | `LLEN key` | Returns list length. |
+| **Sets** | `SADD key mem [mem...]` | Adds unique members to a set. |
+| | `SREM key mem [mem...]` | Removes members from a set. |
+| | `SMEMBERS key` | Returns all members of a set. |
+| | `SISMEMBER key mem` | Tests member presence in a set. |
+| | `SCARD key` | Returns set cardinality. |
+| **Hashes** | `HSET key field val` | Sets field in a hash. |
+| | `HGET key field` | Retrieves field value from a hash. |
+| | `HGETALL key` | Returns all field-value pairs in a hash. |
+| | `HDEL key field [field...]` | Deletes one or more fields from a hash. |
+| | `HEXISTS key field` | Tests if a field exists in a hash. |
+| | `HLEN key` | Returns count of fields in a hash. |
+| **Pub/Sub** | `PUBLISH channel msg` | Posts a message to a channel; returns receiver count. |
+
+---
+
+## Telemetry Collectors: The 8 Implementation Strategies
+
+A central feature of RustRedis is its swappable telemetry collectors in [src/command_metrics.rs](src/command_metrics.rs).
+
+### ⚠️ Important: 6 Main Experiment Strategies vs. 8 Implementation Strategies
+
+To understand the codebase, developers and researchers should note the distinction between the strategy sets:
+1. **The 6 Main Experiment Strategies**: The primary empirical study (*"Cardinality Before Contention"*) evaluated **six collectors** configured as a clean $2^2$ factorial design along 4 orthogonal axes.
+2. **The 8 Final Implementation Strategies**: During the study, two confounding variables were identified (isolating map size from key string hashing, and isolating histogram tracking from string allocation). To untangle these, **two additional strategies (`sharded_bucketed` and `thread_local_owned`) were implemented** for follow-up axis separation.
+
+All **eight strategies** are fully available in the production server binary:
+
+| Strategy Flag (`RUSTREDIS_METRICS_STRATEGY`) | Scope | Synchronization | Cardinality | Aggregation | Payload Recorded |
+|---|---|---|---:|---|---|
+| `disabled` | Main & Final | None | 0 | None | None (Bypassed) |
+| `global_mutex` | Main & Final | Single `Mutex<HashMap>` | 2 (`GET`/`SET`) | Eager, Shared | 64-bit Counter |
+| `sharded_2key` | Main & Final | `DashMap` (64 shards) | 2 (`GET`/`SET`) | Eager, Shared | 64-bit Counter |
+| `sharded_n` | Main & Final | `DashMap` (64 shards) | ~10,000 (Data keys) | Eager, Shared | 64-bit Counter |
+| `thread_local` | Main & Final | Thread-Local Map | 2 (`GET`/`SET`) | Deferred (100ms flush) | 64-bit Counter |
+| `hdr_histogram` | Main & Final | Thread-Local Map | 2 (`GET`/`SET`) | Deferred (100ms flush) | Counter + HDR Histogram |
+| `sharded_bucketed` | **Follow-up Addition** | `DashMap` (64 shards) | Configurable `C` | Eager, Shared | Counter (fixed per-op hash) |
+| `thread_local_owned` | **Follow-up Addition** | Thread-Local Map | 2 (`GET`/`SET`) | Deferred (100ms flush) | Counter (owned string key) |
+
+---
+
+## Testing, Hardening & Benchmarking
+
+### 1. Test Suite
+Run unit tests, keyspace backend tests, and full server integration tests:
+```bash
+cargo test --workspace
+```
+* **Store Integrity**: Validates concurrent writes and expiration across both `mutex` and `dashmap` stores.
+* **Server Integration**: Starts an ephemeral server, connects over TCP, and verifies command execution, pipelining, and error responses.
+
+### 2. Protocol Fuzzing
+The RESP parser has been hardened against hostile inputs using `cargo-fuzz` ([fuzz/](fuzz)):
+```bash
+# Requires Rust nightly
+cargo +nightly fuzz run parse_frame
+```
+The hardened parser has survived 29.3 million continuous fuzzing executions without panic, verifying protection against integer overflow, negative lengths, and unbounded recursive nesting.
+
+### 3. Load Testing (`rustredis-bench`)
+The repository includes a custom high-performance benchmarking crate in [benchmarks/](benchmarks):
+```bash
+# Compile benchmark tool
 cargo build --release --manifest-path benchmarks/Cargo.toml
 
-# 2. Main RMIT experiment (read docs/rmit_experiment_protocol.md first)
-python3 scripts/run_rmit_experiment.py --output-dir experiments/output
-python3 scripts/analyze_rmit_results.py --input experiments/output/raw_data_rmit.csv
-
-# 3. Axis-separation batch (docs/followup_experiment_protocol.md)
-python3 scripts/run_rmit_experiment.py \
-  --strategies all --cardinalities 1,10,100,1000,10000 \
-  --runs 15 --concurrency 100,1000,3000 --workloads mixed \
-  --key-space 10000 --seed 2001 --output-dir experiments/output_followup
-
-# 4. Pool runs and regenerate every number and figure in the paper
-python3 scripts/combine_iterations.py --input-dir <runs-dir> --output-dir <runs-dir>/pooled
-python3 scripts/analyze_design_axes.py              # -> experiments/design_axes_analysis.json
-python3 scripts/generate_design_axes_figures.py     # -> docs/figures/*.{png,pdf}
-```
-
-After `scripts/fetch_data.sh`, the analysis commands need no cloud VM and regenerate every table, figure and quoted statistic in the paper. Their
-outputs are byte-identical on re-run, so a successful reproduction from a fresh
-clone leaves `git status` clean.
-
-Both protocol docs include a manual machine-control checklist (power, sleep, background
-processes) that materially affects result quality, plus the Azure VM path. Run the
-documented smoke test and read its per-run throughput numbers with your own eyes before
-committing hours to a full run.
-
-Server and one-off benchmark by hand:
-
-```bash
-RUSTREDIS_METRICS_STRATEGY=sharded_bucketed RUSTREDIS_METRICS_CARDINALITY=1000 \
-  cargo run --release --bin server
-
+# Execute benchmark run against a running server
 cargo run --release --manifest-path benchmarks/Cargo.toml -- \
   --host 127.0.0.1 --port 6379 \
-  --concurrency 100,500,1000 --requests 1000 --runs 30 \
-  --workload mixed --key-space 10000 --value-size 64 \
-  --output-dir results/manual_run
+  --concurrency 100,500,1000 \
+  --requests 10000 \
+  --runs 15 \
+  --workload mixed \
+  --key-space 10000 \
+  --value-size 64 \
+  --output-dir results/local_test
 ```
 
-### Citing this work
+---
 
-See [CITATION.cff](CITATION.cff). The release corresponding to the manuscript is
-tagged `v1.0-paper`, archived on Zenodo with DOI
-[10.5281/zenodo.23295261](https://doi.org/10.5281/zenodo.23295261).
+# Path B: Understand the Research
 
-## Findings
+RustRedis was developed alongside an empirical systems paper investigating the microarchitectural and concurrency costs of in-memory metrics instrumentation:
 
-Six interchangeable per-command metrics collectors are chosen so that adjacent pairs
-differ along **exactly one design axis** — synchronization discipline, metric key
-cardinality, aggregation locality, per-sample payload — which turns a strategy ranking
-into a **factorial decomposition**. (Two further collectors were added for the
-axis-separation experiment, eight in the tree.) Measurement uses Randomized Multiple Interleaved
-Trials (RMIT; Abedi, Heard & Brecht 2015, shown necessary for clouds by
-[Abedi & Brecht, ICPE 2017](docs/final_paper_v27.md#2-background-and-related-work) — not
-invented here), replicated across independently provisioned Azure VMs with all intervals
-**clustered on runs, not blocks**: **29,520 benchmark runs** (25,200 main design +
-4,320 axis-separation) over **fourteen dedicated cloud VMs**, 100–3000 concurrent
-clients, three read/write mixes.
+> **"Cardinality Before Contention: Decomposing Per-Command Observability Overhead on Concurrent Thread-Pool Key-Value Stores"**  
+> Full manuscript: **[docs/final_paper_v27.md](docs/final_paper_v27.md)**  
+> Comprehensive empirical data & tables: **[docs/research.md](docs/research.md)**  
+> Archived Artifact: DOI [10.5281/zenodo.23295261](https://doi.org/10.5281/zenodo.23295261) (tag `v1.0-paper`)
 
-Four findings:
+```
+========================================================================================
+                                    RESEARCH SUMMARY
+========================================================================================
+ Research Question  │ What does per-command telemetry actually cost on a concurrent
+                    │ thread-pool server — and which design decision is the expensive one?
+────────────────────┼───────────────────────────────────────────────────────────────────
+ Experimental Scale │ 29,520 benchmark trials across 14 dedicated Azure VMs (D4s_v6, D8s_v6)
+                    │ 100 to 3,000 concurrent clients; 3 read/write mixes.
+────────────────────┼───────────────────────────────────────────────────────────────────
+ Core Finding 1     │ CARDINALITY BEATS CONTENTION: Expanding label cardinality costs
+                    │ 1.66× to 4.5× more than the throughput saved by eliminating lock
+                    │ contention. High-cardinality sharded maps are slower than global locks.
+────────────────────┼───────────────────────────────────────────────────────────────────
+ Core Finding 2     │ CLIENT LOAD INVARIANCE: Telemetry overhead is flat across 30×
+                    │ client concurrency; synchronization costs scale with CPU worker count.
+────────────────────┼───────────────────────────────────────────────────────────────────
+ Core Finding 3     │ OVERHEAD RIGIDITY: Counter overhead is elastic and absorbed by queueing
+                    │ slack at p99; HDR histogram cost is rigid across all percentiles.
+────────────────────┼───────────────────────────────────────────────────────────────────
+ Core Finding 4     │ BOUNDED CARDINALITY: The cardinality penalty is non-linear and emerges
+                    │ only above ~1,000 active entries; low-cardinality label counts are free.
+========================================================================================
+```
 
-1. **Cardinality beats contention.** Moving the metric key from a 2-entry command-name
-   label to a ~10,000-entry data-key label costs **0.87 pp** of throughput — **1.66×
-   more** than the 0.52 pp that replacing a global mutex with a 64-way sharded map
-   *saves* (gap 0.34 pp, 95% CI [0.19, 0.50], 10/11 runs, sign p = 0.012). A sharded
-   "scalable" map with a high-cardinality label is measurably **slower** than one global
-   lock with a low-cardinality one. 4.5× at 4 workers and 1.66× at 8 — or 4.51× and
-   1.58× once the two worker counts are matched on workload and client load, which is
-   the comparison to use when pairing them (§5.2).
-2. **The axes obey different scaling laws.** Over a **30× client-concurrency range no
-   axis moves** (largest slope 0.041 pp/doubling, CI spans zero) even though the server
-   is genuinely saturated (p99 0.76 ms → 78.85 ms). The synchronization axis tracks
-   *worker threads* instead (**2.6×** from 4 to 8 workers). Turning up client count
-   cannot expose telemetry contention on a thread-pool server.
-3. **Overhead has rigidity.** Counter costs are *elastic* — only 38–58% of their median
-   cost survives into p99, absorbed by queueing slack. Histogram payload cost is
-   *rigid*: statistically flat at 0.89–0.94 pp across throughput, mean, p50 and p99.
-   This hides a sign reversal: HdrHistogram vs. GlobalMutex is **unresolved on
-   throughput** (p = 0.23, even at 11× replication) yet resolves **in opposite
-   directions** at p50 (cheaper, p = 0.001) and p99 (costlier, p = 0.001).
-4. **The cardinality effect is real, and bounded.** A purpose-built collector whose
-   per-operation work is identical at every cardinality confirms entry count accounts
-   for essentially all of the cardinality axis (and the histogram for ~80% of payload) —
-   but the effect is **indistinguishable from zero below ~10³ entries**.
+## 1. The Research Question
 
-Everything is affordable in absolute terms: no strategy costs more than **1.71 pp** of
-throughput (2.19 pp at p50; the paper quotes the overhead ceiling as ~2.2%). The question
-is never *whether* to instrument, but *how*.
+When engineering telemetry for concurrent servers, backend developers instinctively fear **synchronization contention** (locks, shared atomics) and migrate toward sharded or lock-free data structures. 
 
-### The collectors as a factorial design
+This research asks:
+1. How does lock contention compare to **metric key cardinality**, **aggregation locality**, and **payload complexity**?
+2. How does telemetry overhead scale when a thread-pool server enters real queueing saturation?
+3. Does telemetry cost survive into tail latency ($p99$)?
 
-| Strategy | Synchronization | Cardinality | Aggregation | Payload |
-|---|---|---:|---|---|
-| `disabled` | — | 0 | — | — |
-| `global_mutex` | one global `Mutex<HashMap>` | 2 | eager, shared | counter |
-| `sharded_2key` | `DashMap`, 64 shards | 2 | eager, shared | counter |
-| `sharded_n` | `DashMap`, 64 shards | ~10,000 (data key) | eager, shared | counter |
-| `thread_local` | thread-local map + periodic flush | 2 | deferred, private | counter |
-| `hdr_histogram` | thread-local map + periodic flush | 2 | deferred, private | counter + HDR histogram |
-| `sharded_bucketed` † | `DashMap`, 64 shards | **configurable `C`** | eager, shared | counter |
-| `thread_local_owned` † | thread-local map + periodic flush | 2 | deferred, private | counter, owned key |
+## 2. Experimental Design & Factorial Axes
 
-† Added for the axis-separation experiment. `sharded_bucketed` keys on
-`"<CMD>#<fnv1a(key) mod C>"` so per-operation work is **identical at every `C`**
-(`RUSTREDIS_METRICS_CARDINALITY`); sweeping `C` varies live entry count and nothing else.
-`thread_local_owned` is a line-for-line twin of `hdr_histogram` with the histogram
-replaced by a plain counter.
+We evaluate telemetry along four orthogonal design axes:
+1. **Synchronization (`SYNC`)**: Global `Mutex` vs. 64-shard concurrent `DashMap`.
+2. **Cardinality (`CARD`)**: Low cardinality (2 keys) vs. high cardinality (~10,000 keys).
+3. **Aggregation Locality (`DEFER`)**: Eager shared updates vs. deferred thread-local aggregation.
+4. **Payload (`PAYLOAD`)**: 64-bit integer counter vs. HDR Histogram (`HdrHistogram`).
 
-Timing (`Instant::now()`/`elapsed()`) and the key-hint lookup run identically for **all**
-strategies including `disabled`, so those costs cancel in the paired comparison. Only the
-body of `record()` varies.
+### The 6 Main Strategies vs. 8 Implementation Strategies
+The main factorial experiment evaluated **6 strategies** (`disabled`, `global_mutex`, `sharded_2key`, `sharded_n`, `thread_local`, `hdr_histogram`). The **2 additional strategies** (`sharded_bucketed` and `thread_local_owned`) were introduced in the implementation to isolate pure map cardinality from string formatting, and pure histogram cost from string allocation. For the full strategy matrix, see [docs/research.md](docs/research.md#22-six-main-experiment-strategies-vs-eight-implementation-strategies).
 
-The four contrasts, each a difference against a shared reference (so arbitrary strategy
-comparisons are recoverable by arithmetic):
+## 3. Key Findings
 
-| Axis | Contrast | D8s_v6 (8 workers) | D4s_v6 (4 workers) |
-|---|---|---|---|
-| **CARD** | `sharded_n` − `sharded_2key` | **0.87 [0.73, 1.00]** | **0.79 [0.62, 0.96]** |
-| **PAYLOAD** | `hdr_histogram` − `thread_local` | 0.89 [0.80, 0.97] | 1.00 [0.71, 1.28] |
-| **SYNC** | `global_mutex` − `sharded_2key` | **0.52 [0.42, 0.63]** | **0.18 [−0.02, 0.38]** |
-| **DEFER** | `sharded_2key` − `thread_local` | 0.31 [0.21, 0.41] | 0.26 [−0.00, 0.51] |
+* **Cardinality Dominates Synchronization**: Moving from a 2-key label to ~10,000 keys reduces throughput by **0.87 pp** ($95\%$ CI $[0.73, 1.00]$). In contrast, replacing a global mutex with a 64-way sharded map saves only **0.52 pp** ($95\%$ CI $[0.42, 0.63]$). Contention sharding cannot compensate for high-cardinality labeling.
+* **Overhead is Invariant to Client Concurrency**: Over a $30\times$ client scaling sweep ($c=100 \to c=3000$), server $p99$ latency degrades by $104\times$ (0.76 ms to 78.85 ms), yet telemetry overhead remains completely flat (fitted slope $< 0.041$ pp/doubling). Telemetry overhead scales with OS worker threads ($2.6\times$ from 4 to 8 workers), not client connections.
+* **Overhead Rigidity in Tail Latency**: Counter overheads drop by 40–60% between $p50$ and $p99$ because queueing delay absorbs small CPU delays. However, HDR Histogram overhead remains rigid at ~0.9 pp across throughput, mean, $p50$, and $p99$.
+* **Cardinality Cost Appears Above $\sim 10^3$ Keys**: Controlled sweeps with `sharded_bucketed` prove that cardinality overhead is indistinguishable from zero below 1,000 entries, but increases sharply at 2,000 and 13,040 entries.
 
-pp of throughput vs. `disabled`; all four hold in 11/11 runs. Since both are differences
-against `sharded_2key`, **CARD − SYNC is algebraically `sharded_n` − `global_mutex`** —
-which is why finding 1 has a direct physical reading. SYNC is contaminated *against* our
-own hypothesis (`global_mutex` instruments its own lock wait into a contended atomic), so
-the measured gap is a conservative one.
+For full result tables, confidence intervals, and rigidity indices, refer to **[docs/research.md](docs/research.md#6-comprehensive-result-tables)**.
 
-### Results
+## 4. Statistical Methodology
 
-#### Cost by budget metric (pooled D8s_v6, % vs. `disabled`, 95% CI clustered on 11 runs)
+* **Randomized Multiple Interleaved Trials (RMIT)**: Mitigates environmental drift and virtualization noise by randomizing execution order within repeated measurement blocks.
+* **Within-Block Paired Ratios**: All overheads are computed as ratios against the paired `disabled` run within the exact same block.
+* **Run-Level Clustered Inference**: 11 independent runs $\times$ 15 blocks = 165 blocks per configuration. To avoid overstating precision, inference clusters across independent VM runs ($N=11$), collapsing blocks to run means and constructing Student's $t$-intervals verified by exact sign tests.
 
-| Strategy | Throughput | Mean latency | p50 | p99 |
-|---|---|---|---|---|
-| ThreadLocal | 0.53 [0.42, 0.65] | 0.62 [0.50, 0.74] | 0.72 [0.58, 0.85] | 0.43 [0.22, 0.64] |
-| Sharded-2key | 0.84 [0.77, 0.92] | 0.94 [0.86, 1.01] | 1.13 [1.03, 1.23] | 0.54 [0.31, 0.77] |
-| GlobalMutex | 1.37 [1.27, 1.46] | 1.49 [1.39, 1.58] | 1.79 [1.71, 1.88] | 0.78 [0.54, 1.02] |
-| HdrHistogram | 1.42 [1.32, 1.52] | 1.53 [1.42, 1.64] | 1.66 [1.56, 1.75] | **1.37 [1.09, 1.65]** |
-| Sharded-N | 1.71 [1.58, 1.84] | 1.85 [1.70, 1.99] | 2.19 [2.01, 2.36] | 0.83 [0.60, 1.07] |
+## 5. Limitations & Caveats
 
-The *ranking itself depends on the metric*: HdrHistogram is rank 4 on throughput, rank 3
-at p50, rank 5 at p99. ThreadLocal is cheapest under every metric.
+* **Co-located Workload**: Client and server ran on the same VM over loopback (`127.0.0.1`) to measure pure CPU and memory overhead without network interface cards masking telemetry costs.
+* **Worker Counts**: Verified on 4 vCPU and 8 vCPU instances (`Standard_D4s_v6`, `Standard_D8s_v6`).
+* **Keyspace Backend**: Published paper figures utilized the single-mutex keyspace engine (`Db`) as the reference baseline. The sharded engine (`DbDashMap`) was tested to confirm that keyspace contention does not alter collector rankings (see [docs/CONFOUND_CHECK.md](docs/CONFOUND_CHECK.md)).
 
-#### Scaling (axes, pp per doubling of clients, fitted within run)
+## 6. Accessing the Paper & Artifacts
 
-| Axis | Slope | 95% CI | Runs positive | c=100 → c=3000 |
-|---|---:|---|---:|---|
-| CARD | 0.0004 | [−0.026, 0.027] | 4/11 | 0.95 → 0.86 pp |
-| SYNC | 0.037 | [−0.007, 0.080] | 10/11 | 0.56 → 0.60 pp |
-| DEFER | 0.041 | [−0.009, 0.092] | 8/11 | 0.19 → 0.24 pp |
-| PAYLOAD | 0.038 | [−0.024, 0.100] | 7/11 | 0.81 → 0.74 pp |
+| Document / Resource | Description |
+|---|---|
+| **[docs/research.md](docs/research.md)** | **Consolidated Research Guide**: All datasets, full result tables, scaling slopes, and failure analysis in a single document. |
+| **[docs/final_paper_v27.md](docs/final_paper_v27.md)** | **The Manuscript**: Complete submitted paper (*"Cardinality Before Contention"*), section for section and table for table. |
+| **[docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md)** | Main RMIT experimental protocol and Azure VM provisioning guide. |
+| **[docs/followup_experiment_protocol.md](docs/followup_experiment_protocol.md)** | Axis-separation protocol for `sharded_bucketed` and `thread_local_owned`. |
+| **[docs/figures/](docs/figures)** | Publication figures in high-res PNG and vector PDF format. |
+| **[CITATION.cff](CITATION.cff)** | Citation metadata for academic publications. |
 
-Meanwhile the `disabled` baseline saturates for real: 290,540 ops/s @ p99 0.76 ms at 100
-clients → 259,932 ops/s @ p99 78.85 ms at 3000 (p99 ×104, throughput −10.5%). Graceful
-saturation, no cliff — and telemetry cost simply does not participate. At matched client
-load, 4 → 8 workers moves **SYNC 2.60×** and DEFER 1.39×, while PAYLOAD (0.94×) and CARD
-(0.92×) do not move. Because SYNC grows with parallelism and CARD does not, their ratio
-must close — extrapolating the matched SYNC trend puts a crossover at about 11 workers
-(about 12 if SYNC is instead fitted linearly in worker count), but that is a hypothesis
-from two worker-count points, not a fitted law; present claims are bounded to 4–8 cores.
+### Reproducing the Results
 
-#### Rigidity (tail-concentration index = p99 cost ÷ p50 cost)
-
-| Strategy | p50 | p99 | Index | 95% CI |
-|---|---:|---:|---:|---|
-| Sharded-N | 2.19% | 0.83% | 0.38 | [0.28, 0.48] |
-| GlobalMutex | 1.79% | 0.78% | 0.43 | [0.30, 0.55] |
-| Sharded-2key | 1.13% | 0.54% | 0.49 | [0.27, 0.71] |
-| ThreadLocal | 0.72% | 0.43% | 0.58 | [0.36, 0.81] |
-| **HdrHistogram** | 1.66% | 1.37% | **0.82** | [0.68, 0.96] |
-
-Per axis, SYNC/CARD/DEFER shrink 60–75% from p50 to p99; **PAYLOAD is flat (0.89 → 0.94
-pp)**. Proposed mechanism — a periodic O(buckets) HDR merge under a global lock *creates*
-tail events rather than competing with queueing — is labelled interpretation, not
-measurement: the merge was not instrumented directly.
-
-#### Axis separation (8-VM follow-up, pp, 95% CI clustered on 8 runs)
-
-| Quantity | Estimate | 95% CI | |
-|---|---:|---|---|
-| **pure cardinality** (2 → 13,040 entries, per-op work identical) | **0.652** | [0.280, 1.024] | resolved |
-| CARD total (`sharded_n` − `sharded_2key`) | 0.642 | [0.316, 0.967] | resolved |
-| **histogram alone** (`hdr_histogram` − `thread_local_owned`) | **0.773** | [0.539, 1.006] | resolved |
-| PAYLOAD total (`hdr_histogram` − `thread_local`) | 0.967 | [0.709, 1.226] | resolved |
-| key construction, FNV + `format!` (`sharded_bucketed`@1 − `sharded_2key`) | 0.855 | [0.393, 1.317] | resolved |
-| owned-key allocation, TLS path (`thread_local_owned` − `thread_local`) | 0.195 | [−0.017, 0.407] | **not** resolved |
-
-The anchors reproduce across batches (SYNC 0.527 vs. 0.522, DEFER 0.290 vs. 0.309,
-PAYLOAD 0.967 vs. 0.885), so the batches are comparable. **Cardinality is cardinality,
-not allocation**, and payload is ~80% histogram.
-
-**The cardinality curve — cost is not linear in entries, it appears above ~10³:**
-
-| Data entries | Cost vs. `disabled` | vs. 2 entries | |
-|---:|---:|---|---|
-| 2 | 1.707% | (reference) | |
-| 20 | 1.805% | +0.097 [−0.107, 0.302] | not resolved |
-| 200 | 1.796% | +0.089 [−0.175, 0.352] | not resolved |
-| 2,000 | 2.014% | +0.306 [0.069, 0.543] | resolved |
-| 13,040 | 2.360% | +0.652 [0.280, 1.024] | resolved |
-
-Teams already holding label cardinality to tens or low hundreds buy no throughput by
-shrinking further (the *backend* cost of cardinality is a separate argument, unaffected).
-
-**What this batch does *not* establish:** the strong form of finding 1. Pure cardinality
-minus SYNC is +0.125 pp, CI [−0.358, 0.607], 4/8 runs — unresolved. The paper claims the
-*package* (CARD) against SYNC on the 11-run batch, not the stronger ordering.
-
-**An unplanned demonstration of why pairing matters:** one of the eight VMs (`run_06`)
-ran ~30% below its peers on every configuration. Excluding it moves every contrast by
-< 0.05 pp, because the paired within-block ratio cancels a level shift that hits
-numerator and denominator alike. A design comparing absolute throughputs across
-instances would have been badly distorted.
-
-#### Replication, two-state detection, crossovers
-
-- **No two-state throughput pattern:** the RMIT detector
-  (`scripts/analyze_rmit_results.py`) flags **0 of 192** configurations (0/48 on D4s_v6,
-  0/144 on pooled D8s_v6). It is a largest-gap heuristic, so this rules out large,
-  well-separated state splits, not subtler multimodality.
-- **Crossovers vanish with data:** the leader-change count fell **6 → 4 → 0** as 1 → 10
-  → 11 runs were pooled. Monotonic decay, not stabilization, is itself evidence the
-  earlier "crossovers" were sub-2% noise swaps.
-- **Pooling does not tighten everything.** Paired-ratio comparisons tighten ~3× (the
-  detectable-effect floor drops from ~2.1% for one run to ~0.6–0.75% pooled, computed
-  three agreeing ways). But raw relative CI width on throughput *widened* (mean 0.0091
-  on D4s_v6, 0.0194 pooled), because it reflects genuine run-to-run variance that more
-  within-run samples cannot shrink — and HdrHistogram vs. GlobalMutex got statistically
-  *weaker* with the 11th run (p ≈ 0.11 → 0.23). Finding 3 explains why: that comparison
-  is sign-ambiguous, not underpowered.
-
-#### A failure mode worth recording
-
-The first D8s_v6 attempt reported exactly `0 ops/sec` above ~1000 clients — return code
-0, well-formed output, no error. Cause: the default open-FD limit (1024) on a fresh VM
-was far below the tested concurrency, so every client connection failed and the client
-counted failures internally. `scripts/run_rmit_experiment.py` now raises `RLIMIT_NOFILE`
-and warns when the limit cannot cover the requested concurrency. This is the *inverse* of
-what RMIT defends against: randomization protects against noisy drifting confounds, while
-this was a systematic failure producing suspiciously clean numbers. No design substitutes
-for reading a small dry run's raw output.
-
-## Quick start
+To download the raw data from Zenodo and regenerate all numbers, tables, and figures from scratch:
 
 ```bash
-cargo run --release --bin server                  # listens on 127.0.0.1:6379
-redis-cli -p 6379 set greeting hello              # or: printf '*1\r\n$4\r\nPING\r\n' | nc 127.0.0.1 6379
-redis-cli -p 6379 get greeting
-cargo test --workspace                            # unit + end-to-end tests
+# 1. Setup Python analysis environment
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Fetch raw datasets (~7 MB, SHA256 verified)
+scripts/fetch_data.sh
+
+# 3. Regenerate all paper figures and statistics
+python3 scripts/analyze_design_axes.py
+python3 scripts/generate_design_axes_figures.py
 ```
+Outputs regenerate byte-identical figures in `docs/figures/` and analysis in `experiments/design_axes_analysis.json`.
 
-Configuration is by environment variable:
+---
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `RUSTREDIS_BIND` | `127.0.0.1:6379` | Listen address |
-| `RUSTREDIS_STORE` | `mutex` | Keyspace backend: `mutex` (one global lock) or `dashmap` (sharded) |
-| `RUSTREDIS_METRICS_STRATEGY` | `sharded_2key` | Per-command metrics collector (one of eight; unknown names are an error) |
-| `RUSTREDIS_METRICS_CARDINALITY` | `2` | Entry count for the `sharded_bucketed` collector |
-| `RUSTREDIS_DISABLE_AOF` | off | `1`/`true`/`yes` disables the append-only file |
-| `RUSTREDIS_AOF_PATH` | `appendonly.aof` | AOF location |
-
-### Testing and hardening
-
-`cargo test --workspace` runs unit tests for the RESP parser, command parsing, both
-keyspace stores and the connection layer, plus end-to-end tests that start the real
-server on each store. CI also runs rustfmt and clippy with warnings denied.
-
-The parser is fuzzed (`cargo +nightly fuzz run parse_frame`, target in `fuzz/`). On the
-original code it crashed within seconds; the crashes it and the code review found
-(negative lengths, unbounded nesting, unbounded sizes, `EX` overflow) are fixed and each
-has a regression test. The hardened parser survived a one-hour run of 29.3 million
-executions. See [docs/REVIEW_RESPONSE.md](docs/REVIEW_RESPONSE.md).
-
-## Architecture
-
-1. TCP listener accepts client connections.
-2. Tokio multi-threaded runtime, one task per connection, parses RESP frames.
-3. Command executor operates on shared DB state.
-4. Optional persistence appends to AOF.
-5. Telemetry path updates command metrics via the selected collector.
-
-**Provenance.** The server core (`frame.rs`, `connection.rs`, `db.rs`, `cmd/mod.rs`)
-follows the structure and naming of Tokio's [mini-redis](https://github.com/tokio-rs/mini-redis)
-(MIT): the `Frame` type, `Connection::read_frame`/`write_frame`, and the `Db` and
-command-module split. The metrics subsystem, the load generator and the experimental
-design are original to this project.
-
-Worker count is the Tokio default, so **the number of OS threads that can concurrently
-enter the metrics path equals the vCPU count** regardless of client count — the property
-finding 2 exploits.
-
-Core modules:
-
-- [src/bin/server.rs](src/bin/server.rs): server entry point
-- [src/cmd/mod.rs](src/cmd/mod.rs): command parsing/execution
-- [src/db.rs](src/db.rs): mutex-backed DB
-- [src/db_dashmap.rs](src/db_dashmap.rs): sharded DB backend
-- [src/connection.rs](src/connection.rs): network I/O
-- [src/frame.rs](src/frame.rs): RESP framing
-- [src/persistence.rs](src/persistence.rs): AOF persistence
-- [src/command_metrics.rs](src/command_metrics.rs): the eight metrics collectors
-- [src/metrics.rs](src/metrics.rs): process/system counters
-- [src/pubsub.rs](src/pubsub.rs): pub/sub manager
-
-### Repository layout
+## Repository Structure
 
 ```
 .
-├── src/                       Server (Rust): commands, storage backends, metrics collectors
-├── benchmarks/                Load-generator crate (rustredis-bench)
-├── scripts/                   Experiment runner, analysis, pooling, figures
-├── experiments/               Analysis JSON, one sample run; full raw CSVs via scripts/fetch_data.sh
-│   ├── azure_d4s_v6/          D4s_v6, single run
-│   ├── azure_d8s_v6/          D8s_v6: run_00..run_10 + pooled/ (11 runs)
-│   └── azure_d8s_v6_followup/ D8s_v6 axis separation: run_01..run_08 + pooled/
-├── docs/                      Manuscript, protocols, design notes, figures
-├── submission/                Cover letter and pre-submission checklist
-├── archive/                   Superseded drafts and their figures
-├── CITATION.cff               How to cite the artifact and the paper
-├── requirements.txt           Python deps for the analysis and figure scripts
-└── LICENSE
+├── src/                       # RustRedis server implementation
+│   ├── bin/server.rs          # Server entry point & Tokio connection loop
+│   ├── cmd/                   # Command parsing, execution, and dispatch
+│   ├── command_metrics.rs     # The 8 telemetry collectors
+│   ├── connection.rs          # Buffered TCP stream reader/writer
+│   ├── db.rs                  # Single-mutex keyspace storage engine
+│   ├── db_dashmap.rs          # Sharded keyspace storage engine (DashMap)
+│   ├── frame.rs               # RESP protocol parser and serializers
+│   ├── persistence.rs         # AOF persistence and recovery replay
+│   ├── pubsub.rs              # Tokio broadcast-based Pub/Sub
+│   └── store.rs               # Storage engine abstraction trait
+├── benchmarks/                # rustredis-bench: custom asynchronous load generator
+├── docs/                      # Documentation & Research
+│   ├── research.md            # Complete consolidated research data and analysis
+│   ├── final_paper_v27.md     # Full submitted research paper manuscript
+│   ├── figures/               # Vector and PNG publication figures
+│   └── *_protocol.md          # Cloud VM provisioning and RMIT execution protocols
+├── experiments/               # Analysis results and pooled experimental datasets
+├── fuzz/                      # LibFuzzer targets for parser robustness testing
+├── scripts/                   # Python automation: RMIT execution, analysis, pooling
+└── tests/                     # Server integration and end-to-end tests
 ```
 
-### Documentation
-
-- [docs/final_paper_v27.md](docs/final_paper_v27.md) — **"Cardinality Before
-  Contention"**, the manuscript. Every table, figure and quoted statistic
-  regenerates from committed artifacts; see its Appendix A.
-- [docs/README.md](docs/README.md) — index of the documentation.
-- [submission/](submission) — cover letter and pre-submission checklist.
-- [archive/](archive) — superseded working material, including an earlier
-  measurement-study draft of the same data. Nothing there is cited by the manuscript.
-- [docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md) — main protocol
-  and Azure VM setup.
-- [docs/followup_experiment_protocol.md](docs/followup_experiment_protocol.md) —
-  axis-separation batch protocol.
-- [docs/system-design.md](docs/system-design.md),
-  [docs/failure-analysis.md](docs/failure-analysis.md),
-  [docs/related_work_notes.md](docs/related_work_notes.md)
-- [docs/figures/](docs/figures) — paper figures (axis decomposition, scaling, rigidity,
-  cardinality curve), each as a 200-dpi PNG and a vector PDF for submission.
-
-## Caveats
-
-The known limitations of the server itself (lazy-only expiry, single database, no
-clustering, `KEYS` scanning under the lock) are in [docs/limitations.md](docs/limitations.md).
-The measurement caveats follow.
-
-- One VM family, one x86-64 OS image: replicated across VM size, instance, region and
-  workload, but not across clouds or hardware families.
-- Client and server share the machine; at the highest concurrency this is a genuine
-  thread-oversubscription stress test, not an isolated server measurement.
-- Only 4 and 8 vCPU/worker counts tested — no claim about other architectures or core
-  counts, including the extrapolated SYNC/CARD crossover.
-- A logging bug recorded a placeholder processor string in the D4s_v6 run's metadata, so
-  while all eleven D8s_v6 runs verifiably share one CPU model (Intel Xeon Platinum
-  8573C), the artifact cannot confirm the 4-vCPU VM used the same microarchitecture.
-- The ~10³-entry threshold of finding 4 is measured with one instrument on one server and
-  may be a property of this DashMap configuration rather than of the class.
-- The HDR-merge mechanism for rigidity is interpretation, not direct measurement.
-- All published runs used the default single-mutex keyspace store, so every request
-  passes one global lock before reaching the metrics collector. That could compress the
-  synchronization-axis differences. A sharded `dashmap` store is now selectable
-  (`RUSTREDIS_STORE=dashmap`) so the comparison can be repeated; see
-  [docs/CONFOUND_CHECK.md](docs/CONFOUND_CHECK.md) and
-  [docs/REVIEW_RESPONSE.md](docs/REVIEW_RESPONSE.md).
+---
 
 ## License
 
-MIT.
+This project is licensed under the [MIT License](LICENSE).

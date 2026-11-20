@@ -18,6 +18,9 @@ The submitted manuscript:
 
 Supporting documents:
 
+- [research.md](research.md): **Consolidated Research Guide & Data** — comprehensive
+  breakdown of the research question, factorial design, complete result tables,
+  scaling laws, overhead rigidity, and artifact reproduction.
 - [rmit_experiment_protocol.md](rmit_experiment_protocol.md): how the main
   experiments are run, including Azure VM provisioning
 - [followup_experiment_protocol.md](followup_experiment_protocol.md): the
