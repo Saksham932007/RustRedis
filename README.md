@@ -4,46 +4,45 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23295261.svg)](https://doi.org/10.5281/zenodo.23295261)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-RustRedis is a high-performance, Redis-compatible in-memory key-value server written in Rust (~3,500 LOC). It features a multi-threaded asynchronous architecture powered by Tokio, pluggable keyspace backends, append-only file (AOF) persistence, and an extensible telemetry subsystem.
+RustRedis is a high-performance, Redis-compatible in-memory key-value server written in Rust (~3,500 LOC). It is built on a multi-threaded asynchronous runtime powered by Tokio, featuring pluggable storage backends, Append-Only File (AOF) persistence, and an interchangeable telemetry subsystem.
 
-This repository serves two distinct audiences. Choose the path that matches your interest:
-
----
-
-### Choose Your Path
-
-* **[Path A: Build and Use the Server](#path-a-build-and-use-the-server)**  
-  *For backend engineers and systems developers.*  
-  Learn about the RESP server implementation, multi-threaded Tokio architecture, AOF persistence engine, supported Redis commands, telemetry strategies, and instructions to run and benchmark the server.
-
-* **[Path B: Understand the Research](#path-b-understand-the-research)**  
-  *For researchers, performance engineers, and observability architects.*  
-  Explore the empirical study (*"Cardinality Before Contention"*), the factorial experimental design, key research findings, statistical methodology (RMIT), paper manuscript, and reproducibility suite. All exhaustive empirical data tables are preserved in **[docs/research.md](docs/research.md)**.
+The project also serves as the artifact for an empirical study on the concurrency and microarchitectural costs of observability telemetry in thread-pool servers (*"Cardinality Before Contention"*, prepared for *Software: Practice and Experience*). Full empirical datasets and statistical results are documented in **[docs/research.md](docs/research.md)**.
 
 ---
 
-# Path A: Build and Use the Server
+## Features
+
+- **Redis Protocol (RESP2) Support**: Robust binary-safe framing for Simple Strings, Errors, Integers, Bulk Strings, Arrays, and Nulls.
+- **Asynchronous Multi-threaded Runtime**: Powered by Tokio; client connections run concurrently as lightweight async tasks dispatched across an OS worker thread pool.
+- **Pluggable Keyspace Storage**:
+  - `mutex`: Single global lock protecting a `HashMap` (baseline reference).
+  - `dashmap`: 64-way sharded concurrent hash map (`DashMap`) for scalable multi-threaded reads and writes.
+- **AOF Persistence**: Write-ahead logging (WAL) in standard RESP format with configurable sync policies (`Always`, `EverySecond`, `No`) and crash recovery replay.
+- **Pub/Sub Engine**: Channel-based publish/subscribe message delivery backed by Tokio broadcast channels.
+- **Pluggable Observability Collectors**: 8 interchangeable metrics collectors to measure and evaluate per-command telemetry overhead.
+- **Hardened Implementation**: Fuzzed with `cargo-fuzz` (over 29.3 million executions survived without crash).
+
+---
 
 ## Quick Start
 
-### 1. Prerequisites & Compilation
+### Building the Server
 
-Ensure you have a recent Rust toolchain installed (edition 2021, Rust 1.75+ recommended):
+Ensure you have Rust 1.75+ installed:
 
 ```bash
-# Build the release binary
 cargo build --release --bin server
 ```
 
-### 2. Running the Server
+### Running the Server
 
-Start the server on the default address (`127.0.0.1:6379`):
+Start RustRedis with default settings (listens on `127.0.0.1:6379`):
 
 ```bash
 cargo run --release --bin server
 ```
 
-The server outputs structured logs via `tracing`:
+Output:
 ```text
 INFO RustRedis server listening on 127.0.0.1:6379
 INFO Keyspace store: mutex
@@ -52,54 +51,56 @@ INFO AOF persistence enabled with EverySecond sync policy (path: appendonly.aof)
 INFO Press CTRL+C to shutdown gracefully
 ```
 
-### 3. Interacting with the Server
+### Connecting with Redis Clients
 
-You can connect to RustRedis using standard Redis clients such as `redis-cli`, Python (`redis-py`), Go (`go-redis`), or raw TCP (`nc`, `telnet`):
+Connect using standard clients like `redis-cli`, Python (`redis-py`), Go (`go-redis`), or raw TCP (`nc`, `telnet`):
 
 ```bash
-# Basic connection check
-redis-cli -p 6379 ping
+# Basic connectivity
+redis-cli -p 6379 PING
 # PONG
 
-# String operations with expiration
-redis-cli -p 6379 set session:token "abc123xyz" EX 300
+# String key-value with TTL expiration
+redis-cli -p 6379 SET session:token "9f8a3c" EX 300
 # OK
-redis-cli -p 6379 get session:token
-# "abc123xyz"
+redis-cli -p 6379 GET session:token
+# "9f8a3c"
 
 # List operations
-redis-cli -p 6379 lpush tasks "task_1" "task_2"
+redis-cli -p 6379 LPUSH queue:jobs "job_01" "job_02"
 # (integer) 2
-redis-cli -p 6379 lrange tasks 0 -1
-# 1) "task_2"
-# 2) "task_1"
+redis-cli -p 6379 LRANGE queue:jobs 0 -1
+# 1) "job_02"
+# 2) "job_01"
 
-# Telemetry inspection
-redis-cli -p 6379 stats
-redis-cli -p 6379 cmdstat
+# Query live telemetry statistics
+redis-cli -p 6379 STATS
+redis-cli -p 6379 CMDSTAT
 ```
 
-### 4. Configuration
+---
+
+## Configuration
 
 RustRedis is configured via environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `RUSTREDIS_BIND` | `127.0.0.1:6379` | TCP socket address and port to bind to. |
-| `RUSTREDIS_STORE` | `mutex` | Keyspace storage engine: `mutex` (single global lock) or `dashmap` (sharded concurrent map). |
-| `RUSTREDIS_METRICS_STRATEGY` | `sharded_2key` | Metrics telemetry collector (one of 8 strategies, see below). |
+| `RUSTREDIS_BIND` | `127.0.0.1:6379` | Socket address and port to listen on. |
+| `RUSTREDIS_STORE` | `mutex` | Keyspace storage engine: `mutex` (global lock) or `dashmap` (64 shards). |
+| `RUSTREDIS_METRICS_STRATEGY` | `sharded_2key` | Metrics telemetry collector strategy (one of 8 strategies, see below). |
 | `RUSTREDIS_METRICS_CARDINALITY` | `2` | Active key cardinality for the `sharded_bucketed` collector. |
-| `RUSTREDIS_DISABLE_AOF` | `false` | Set to `1`, `true`, or `yes` to disable write persistence. |
+| `RUSTREDIS_DISABLE_AOF` | `false` | Set to `1`, `true`, or `yes` to disable AOF persistence. |
 | `RUSTREDIS_AOF_PATH` | `appendonly.aof` | File path for the Append-Only File. |
 
-Example: Run a high-concurrency instance with sharded keyspace storage and thread-local metrics:
+#### Example: High-Throughput Sharded Mode
 ```bash
 RUSTREDIS_STORE=dashmap RUSTREDIS_METRICS_STRATEGY=thread_local cargo run --release --bin server
 ```
 
 ---
 
-## Server Architecture & Internals
+## System Architecture
 
 ```
                        ┌──────────────────────────────────────────────┐
@@ -134,37 +135,34 @@ RUSTREDIS_STORE=dashmap RUSTREDIS_METRICS_STRATEGY=thread_local cargo run --rele
 └──────────────────┘        └───────────────────────┘
 ```
 
-### 1. RESP Protocol Parser & Framing
-The server implements the Redis Serialization Protocol (RESP2) in [src/frame.rs](src/frame.rs) and [src/connection.rs](src/connection.rs):
-* **Supported Frame Types**: Simple Strings (`+`), Errors (`-`), Integers (`:`), Bulk Strings (`$`), Arrays (`*`), and Nulls.
-* **Hardened Framing**: Zero-copy buffered I/O with `bytes::BytesMut`. Validates integer boundaries, rejects recursive nesting attacks, and handles partial frames cleanly without unbounded buffer allocation.
-* **Streaming Network I/O**: Connections read and write asynchronously over `tokio::net::TcpStream` using a buffered flush model to optimize throughput under pipelined workloads.
+### 1. RESP Protocol & Network Framing
+- Implemented in [src/frame.rs](src/frame.rs) and [src/connection.rs](src/connection.rs).
+- Parses standard Redis RESP2 frames with strict validation: negative length rejection, nesting limits, integer bounds checking, and memory allocation protections.
+- Connections use buffered streaming over `tokio::net::TcpStream` with `bytes::BytesMut`, minimizing allocations and flushing pending replies efficiently under pipelined requests.
 
-### 2. Tokio Asynchronous Multi-threaded Runtime
-Implemented in [src/bin/server.rs](src/bin/server.rs):
-* **Task Isolation**: When a TCP connection is accepted, it is spawned onto the Tokio multi-threaded runtime (`#[tokio::main(flavor = "multi_thread")]`).
-* **Decoupled Concurrency**: The server handles thousands of concurrent client connections without spawning an OS thread per connection. The Tokio runtime dispatches async tasks across a worker thread pool sized to host vCPUs.
-* **Worker Thread Determinism**: The number of OS threads concurrently entering the database or telemetry hot path equals the host's physical/virtual core count, independent of the number of active network sockets.
+### 2. Tokio Asynchronous Concurrency Model
+- Implemented in [src/bin/server.rs](src/bin/server.rs).
+- Uses `#[tokio::main(flavor = "multi_thread")]`. Each accepted TCP connection is handled in an independent asynchronous task.
+- Worker threads match host CPU cores (vCPUs), decoupling network connection concurrency from OS thread execution. Client connection counts do not cause thread oversubscription inside the server runtime.
 
-### 3. Pluggable Storage Backends (`Store` Trait)
-Database backends implement the `Store` trait in [src/store.rs](src/store.rs):
-* **`Db` ([src/db.rs](src/db.rs))**: A single global `std::sync::Mutex` protecting a `HashMap<String, Entry>`. This provides standard single-threaded Redis serialization semantics and serves as the baseline reference.
-* **`DbDashMap` ([src/db_dashmap.rs](src/db_dashmap.rs))**: A concurrent, 64-way sharded hash map (`dashmap::DashMap`) for concurrent read/write scaling.
-* **Expiration Engine**: Passive/lazy expiration on key access across all data types, checking millisecond timestamps before returning values.
+### 3. Storage Engines (`Store` Trait)
+- Defined in [src/store.rs](src/store.rs):
+  - **`Db` ([src/db.rs](src/db.rs))**: Uses `Arc<Mutex<Shared>>` wrapping a `HashMap`. Provides predictable, strict single-lock serialization.
+  - **`DbDashMap` ([src/db_dashmap.rs](src/db_dashmap.rs))**: Uses `DashMap` partitioned across 64 independent shards to reduce write contention under high concurrency.
+- Expiration: Passive/lazy TTL evaluation on key access across all data types.
 
-### 4. AOF (Append-Only File) Persistence Engine
-Implemented in [src/persistence.rs](src/persistence.rs):
-* **Write-Ahead Logging**: Mutating commands (`SET`, `DEL`, `LPUSH`, `HSET`, etc.) are serialized into standard RESP array frames and written to disk.
-* **Sync Policies**:
-  * `Always`: Synchronously calls `fsync()` after every write command (maximum durability, lowest throughput).
-  * `EverySecond` (default): Appends writes to the OS buffer cache and flushes to disk once per second via a dedicated background Tokio task.
-  * `No`: Delegates sync decisions entirely to the OS buffer management.
-* **Crash Recovery Replay**: On server startup, `Aof::load` scans and validates the AOF file, replaying commands sequentially through `Command::replay` to reconstruct keyspace state before accepting client traffic.
+### 4. Append-Only File (AOF) Persistence
+- Implemented in [src/persistence.rs](src/persistence.rs).
+- Serializes write commands into RESP frames and appends them to disk.
+- Sync policies:
+  - `Always`: Calls `fsync()` after every write command.
+  - `EverySecond` (default): Asynchronously flushes the file descriptor every second via a dedicated background Tokio task.
+  - `No`: Leaves synchronization timing to the operating system.
+- Crash recovery: Upon startup, `Aof::load()` reads the AOF log, parsing and replaying recorded commands to reconstruct the in-memory keyspace before serving requests.
 
-### 5. Pub/Sub Subsystem
-Implemented in [src/pubsub.rs](src/pubsub.rs):
-* Centralized broadcast hub using `tokio::sync::broadcast` channels with bounded capacity (1,024 messages per channel).
-* Independent channel lifecycle management with automatic cleanup of inactive channels when subscriber counts drop to zero.
+### 5. Pub/Sub Engine
+- Implemented in [src/pubsub.rs](src/pubsub.rs).
+- Manages real-time broadcast channels with `tokio::sync::broadcast` (bounded at 1,024 messages per channel). Unused channels are automatically pruned when subscriber counts drop to zero.
 
 ---
 
@@ -174,52 +172,50 @@ Implemented in [src/cmd/mod.rs](src/cmd/mod.rs):
 
 | Category | Commands | Description |
 |---|---|---|
-| **Connection & Server** | `PING [msg]` | Tests server connectivity; echoes optional message. |
+| **Server & Connection** | `PING [msg]` | Tests server connectivity; echoes optional message. |
 | | `ECHO msg` | Returns the input message. |
-| | `STATS` | Returns process metrics, active connections, total ops, and AOF timing. |
-| | `CMDSTAT` | Returns real-time latency and call counts from the active metrics collector. |
+| | `STATS` | Returns process uptime, connected clients, operations count, and AOF sync stats. |
+| | `CMDSTAT` | Returns per-command call counts and execution times from the active metrics collector. |
 | **Strings & Keyspace** | `GET key` | Retrieves the string value of a key. |
-| | `SET key value [EX sec]` | Sets key to value with optional TTL in seconds. |
+| | `SET key val [EX sec]` | Sets key to value with optional TTL expiration in seconds. |
 | | `DEL key [key...]` | Deletes one or more keys. |
 | | `EXISTS key` | Returns 1 if key exists, 0 otherwise. |
-| | `TYPE key` | Returns data type (`string`, `list`, `set`, `hash`, or `none`). |
-| | `DBSIZE` | Returns total keys stored in the active database. |
-| | `FLUSHDB` | Removes all keys from the database. |
-| | `KEYS pattern` | Returns keys matching glob-style pattern (e.g., `user:*`). |
-| **Lists** | `LPUSH key val [val...]` | Prepends one or more elements to a list. |
-| | `RPUSH key val [val...]` | Appends one or more elements to a list. |
-| | `LPOP key` | Removes and returns the first element of a list. |
-| | `RPOP key` | Removes and returns the last element of a list. |
-| | `LRANGE key start stop` | Returns range of elements (supports negative indices). |
-| | `LLEN key` | Returns list length. |
-| **Sets** | `SADD key mem [mem...]` | Adds unique members to a set. |
-| | `SREM key mem [mem...]` | Removes members from a set. |
-| | `SMEMBERS key` | Returns all members of a set. |
-| | `SISMEMBER key mem` | Tests member presence in a set. |
-| | `SCARD key` | Returns set cardinality. |
-| **Hashes** | `HSET key field val` | Sets field in a hash. |
+| | `TYPE key` | Returns the data type (`string`, `list`, `set`, `hash`, `none`). |
+| | `DBSIZE` | Returns the count of keys in the database. |
+| | `FLUSHDB` | Deletes all keys from the database. |
+| | `KEYS pattern` | Returns all keys matching glob-style pattern (e.g. `user:*`). |
+| **Lists** | `LPUSH key val...` | Prepends one or more elements to a list. |
+| | `RPUSH key val...` | Appends one or more elements to a list. |
+| | `LPOP key` | Pops element from the left of a list. |
+| | `RPOP key` | Pops element from the right of a list. |
+| | `LRANGE key start stop`| Returns range of elements (supports negative indices). |
+| | `LLEN key` | Returns length of a list. |
+| **Sets** | `SADD key mem...` | Adds members to a set. |
+| | `SREM key mem...` | Removes members from a set. |
+| | `SMEMBERS key` | Returns all members in a set. |
+| | `SISMEMBER key mem` | Checks if a member exists in a set. |
+| | `SCARD key` | Returns cardinality of a set. |
+| **Hashes** | `HSET key field val` | Sets field value in a hash. |
 | | `HGET key field` | Retrieves field value from a hash. |
-| | `HGETALL key` | Returns all field-value pairs in a hash. |
-| | `HDEL key field [field...]` | Deletes one or more fields from a hash. |
-| | `HEXISTS key field` | Tests if a field exists in a hash. |
+| | `HGETALL key` | Returns all fields and values in a hash. |
+| | `HDEL key field...` | Deletes fields from a hash. |
+| | `HEXISTS key field` | Checks if field exists in a hash. |
 | | `HLEN key` | Returns count of fields in a hash. |
-| **Pub/Sub** | `PUBLISH channel msg` | Posts a message to a channel; returns receiver count. |
+| **Pub/Sub** | `PUBLISH channel msg` | Publishes message to a channel; returns subscriber count. |
 
 ---
 
 ## Telemetry Collectors: The 8 Implementation Strategies
 
-A central feature of RustRedis is its swappable telemetry collectors in [src/command_metrics.rs](src/command_metrics.rs).
+RustRedis features 8 interchangeable metrics collectors in [src/command_metrics.rs](src/command_metrics.rs) to examine how observability designs impact request throughput and latency.
 
-### ⚠️ Important: 6 Main Experiment Strategies vs. 8 Implementation Strategies
+### ⚠️ Note on Research Strategies vs. Implementation Strategies
+- **6 Strategies in the Main Paper Experiment**: The primary empirical study evaluated **six strategies** (`disabled`, `global_mutex`, `sharded_2key`, `sharded_n`, `thread_local`, `hdr_histogram`) configured along 4 factorial design axes.
+- **8 Strategies in the Final Implementation**: To isolate potential confounds (separating map entry count from string hashing/formatting, and separating histogram tracking from owned-string allocation), **two auxiliary strategies (`sharded_bucketed` and `thread_local_owned`) were introduced** in the follow-up axis-separation study.
 
-To understand the codebase, developers and researchers should note the distinction between the strategy sets:
-1. **The 6 Main Experiment Strategies**: The primary empirical study (*"Cardinality Before Contention"*) evaluated **six collectors** configured as a clean $2^2$ factorial design along 4 orthogonal axes.
-2. **The 8 Final Implementation Strategies**: During the study, two confounding variables were identified (isolating map size from key string hashing, and isolating histogram tracking from string allocation). To untangle these, **two additional strategies (`sharded_bucketed` and `thread_local_owned`) were implemented** for follow-up axis separation.
+All eight collectors are available via `RUSTREDIS_METRICS_STRATEGY`:
 
-All **eight strategies** are fully available in the production server binary:
-
-| Strategy Flag (`RUSTREDIS_METRICS_STRATEGY`) | Scope | Synchronization | Cardinality | Aggregation | Payload Recorded |
+| Strategy Name | Scope | Synchronization | Cardinality | Aggregation | Payload Recorded |
 |---|---|---|---:|---|---|
 | `disabled` | Main & Final | None | 0 | None | None (Bypassed) |
 | `global_mutex` | Main & Final | Single `Mutex<HashMap>` | 2 (`GET`/`SET`) | Eager, Shared | 64-bit Counter |
@@ -232,31 +228,24 @@ All **eight strategies** are fully available in the production server binary:
 
 ---
 
-## Testing, Hardening & Benchmarking
+## Testing & Hardening
 
 ### 1. Test Suite
-Run unit tests, keyspace backend tests, and full server integration tests:
+Run unit tests, keyspace backend tests, and server integration tests:
 ```bash
 cargo test --workspace
 ```
-* **Store Integrity**: Validates concurrent writes and expiration across both `mutex` and `dashmap` stores.
-* **Server Integration**: Starts an ephemeral server, connects over TCP, and verifies command execution, pipelining, and error responses.
 
 ### 2. Protocol Fuzzing
-The RESP parser has been hardened against hostile inputs using `cargo-fuzz` ([fuzz/](fuzz)):
+Hardened against malicious or malformed inputs using `cargo-fuzz` ([fuzz/](fuzz)):
 ```bash
-# Requires Rust nightly
 cargo +nightly fuzz run parse_frame
 ```
-The hardened parser has survived 29.3 million continuous fuzzing executions without panic, verifying protection against integer overflow, negative lengths, and unbounded recursive nesting.
+Survives tens of millions of continuous executions with zero panics.
 
-### 3. Load Testing (`rustredis-bench`)
-The repository includes a custom high-performance benchmarking crate in [benchmarks/](benchmarks):
+### 3. Benchmark Harness (`rustredis-bench`)
+The custom load generator in [benchmarks/](benchmarks) can be used to run throughput and latency sweeps:
 ```bash
-# Compile benchmark tool
-cargo build --release --manifest-path benchmarks/Cargo.toml
-
-# Execute benchmark run against a running server
 cargo run --release --manifest-path benchmarks/Cargo.toml -- \
   --host 127.0.0.1 --port 6379 \
   --concurrency 100,500,1000 \
@@ -270,108 +259,40 @@ cargo run --release --manifest-path benchmarks/Cargo.toml -- \
 
 ---
 
-# Path B: Understand the Research
+## Research & Academic Artifact
 
-RustRedis was developed alongside an empirical systems paper investigating the microarchitectural and concurrency costs of in-memory metrics instrumentation:
+RustRedis was developed alongside an empirical study on in-memory key-value server instrumentation:
 
 > **"Cardinality Before Contention: Decomposing Per-Command Observability Overhead on Concurrent Thread-Pool Key-Value Stores"**  
+> Prepared for *Software: Practice and Experience*.  
 > Full manuscript: **[docs/final_paper_v27.md](docs/final_paper_v27.md)**  
-> Comprehensive empirical data & tables: **[docs/research.md](docs/research.md)**  
+> Complete empirical data & tables: **[docs/research.md](docs/research.md)**  
 > Archived Artifact: DOI [10.5281/zenodo.23295261](https://doi.org/10.5281/zenodo.23295261) (tag `v1.0-paper`)
 
-```
-========================================================================================
-                                    RESEARCH SUMMARY
-========================================================================================
- Research Question  │ What does per-command telemetry actually cost on a concurrent
-                    │ thread-pool server — and which design decision is the expensive one?
-────────────────────┼───────────────────────────────────────────────────────────────────
- Experimental Scale │ 29,520 benchmark trials across 14 dedicated Azure VMs (D4s_v6, D8s_v6)
-                    │ 100 to 3,000 concurrent clients; 3 read/write mixes.
-────────────────────┼───────────────────────────────────────────────────────────────────
- Core Finding 1     │ CARDINALITY BEATS CONTENTION: Expanding label cardinality costs
-                    │ 1.66× to 4.5× more than the throughput saved by eliminating lock
-                    │ contention. High-cardinality sharded maps are slower than global locks.
-────────────────────┼───────────────────────────────────────────────────────────────────
- Core Finding 2     │ CLIENT LOAD INVARIANCE: Telemetry overhead is flat across 30×
-                    │ client concurrency; synchronization costs scale with CPU worker count.
-────────────────────┼───────────────────────────────────────────────────────────────────
- Core Finding 3     │ OVERHEAD RIGIDITY: Counter overhead is elastic and absorbed by queueing
-                    │ slack at p99; HDR histogram cost is rigid across all percentiles.
-────────────────────┼───────────────────────────────────────────────────────────────────
- Core Finding 4     │ BOUNDED CARDINALITY: The cardinality penalty is non-linear and emerges
-                    │ only above ~1,000 active entries; low-cardinality label counts are free.
-========================================================================================
-```
+### Summary of Research Findings
 
-## 1. The Research Question
+1. **Cardinality Beats Contention**: High-cardinality metric labels (~10,000 keys) cost **0.87 pp** of throughput, whereas eliminating lock contention via sharding saves only **0.52 pp**. A sharded map with high-cardinality labels is measurably *slower* than a single global lock with low-cardinality labels.
+2. **Client Load Invariance**: Over a 30× client concurrency sweep (100 to 3,000 clients), telemetry overhead remains flat even as server p99 latency degrades by 104×. Telemetry synchronization costs scale with OS worker threads, not client connections.
+3. **Overhead Rigidity in Tail Latency**: Counter overheads drop by 40–60% between p50 and p99 as queueing slack absorbs minor delays. In contrast, HDR Histogram payload costs remain rigid (~0.9 pp) across all percentiles.
+4. **Bounded Cardinality**: Below ~1,000 entries, label cardinality costs are statistically indistinguishable from zero; the penalty emerges primarily at higher key spaces.
 
-When engineering telemetry for concurrent servers, backend developers instinctively fear **synchronization contention** (locks, shared atomics) and migrate toward sharded or lock-free data structures. 
+For full result tables, confidence intervals, scaling slopes, and failure analyses, see **[docs/research.md](docs/research.md)**.
 
-This research asks:
-1. How does lock contention compare to **metric key cardinality**, **aggregation locality**, and **payload complexity**?
-2. How does telemetry overhead scale when a thread-pool server enters real queueing saturation?
-3. Does telemetry cost survive into tail latency ($p99$)?
-
-## 2. Experimental Design & Factorial Axes
-
-We evaluate telemetry along four orthogonal design axes:
-1. **Synchronization (`SYNC`)**: Global `Mutex` vs. 64-shard concurrent `DashMap`.
-2. **Cardinality (`CARD`)**: Low cardinality (2 keys) vs. high cardinality (~10,000 keys).
-3. **Aggregation Locality (`DEFER`)**: Eager shared updates vs. deferred thread-local aggregation.
-4. **Payload (`PAYLOAD`)**: 64-bit integer counter vs. HDR Histogram (`HdrHistogram`).
-
-### The 6 Main Strategies vs. 8 Implementation Strategies
-The main factorial experiment evaluated **6 strategies** (`disabled`, `global_mutex`, `sharded_2key`, `sharded_n`, `thread_local`, `hdr_histogram`). The **2 additional strategies** (`sharded_bucketed` and `thread_local_owned`) were introduced in the implementation to isolate pure map cardinality from string formatting, and pure histogram cost from string allocation. For the full strategy matrix, see [docs/research.md](docs/research.md#22-six-main-experiment-strategies-vs-eight-implementation-strategies).
-
-## 3. Key Findings
-
-* **Cardinality Dominates Synchronization**: Moving from a 2-key label to ~10,000 keys reduces throughput by **0.87 pp** ($95\%$ CI $[0.73, 1.00]$). In contrast, replacing a global mutex with a 64-way sharded map saves only **0.52 pp** ($95\%$ CI $[0.42, 0.63]$). Contention sharding cannot compensate for high-cardinality labeling.
-* **Overhead is Invariant to Client Concurrency**: Over a $30\times$ client scaling sweep ($c=100 \to c=3000$), server $p99$ latency degrades by $104\times$ (0.76 ms to 78.85 ms), yet telemetry overhead remains completely flat (fitted slope $< 0.041$ pp/doubling). Telemetry overhead scales with OS worker threads ($2.6\times$ from 4 to 8 workers), not client connections.
-* **Overhead Rigidity in Tail Latency**: Counter overheads drop by 40–60% between $p50$ and $p99$ because queueing delay absorbs small CPU delays. However, HDR Histogram overhead remains rigid at ~0.9 pp across throughput, mean, $p50$, and $p99$.
-* **Cardinality Cost Appears Above $\sim 10^3$ Keys**: Controlled sweeps with `sharded_bucketed` prove that cardinality overhead is indistinguishable from zero below 1,000 entries, but increases sharply at 2,000 and 13,040 entries.
-
-For full result tables, confidence intervals, and rigidity indices, refer to **[docs/research.md](docs/research.md#6-comprehensive-result-tables)**.
-
-## 4. Statistical Methodology
-
-* **Randomized Multiple Interleaved Trials (RMIT)**: Mitigates environmental drift and virtualization noise by randomizing execution order within repeated measurement blocks.
-* **Within-Block Paired Ratios**: All overheads are computed as ratios against the paired `disabled` run within the exact same block.
-* **Run-Level Clustered Inference**: 11 independent runs $\times$ 15 blocks = 165 blocks per configuration. To avoid overstating precision, inference clusters across independent VM runs ($N=11$), collapsing blocks to run means and constructing Student's $t$-intervals verified by exact sign tests.
-
-## 5. Limitations & Caveats
-
-* **Co-located Workload**: Client and server ran on the same VM over loopback (`127.0.0.1`) to measure pure CPU and memory overhead without network interface cards masking telemetry costs.
-* **Worker Counts**: Verified on 4 vCPU and 8 vCPU instances (`Standard_D4s_v6`, `Standard_D8s_v6`).
-* **Keyspace Backend**: Published paper figures utilized the single-mutex keyspace engine (`Db`) as the reference baseline. The sharded engine (`DbDashMap`) was tested to confirm that keyspace contention does not alter collector rankings (see [docs/CONFOUND_CHECK.md](docs/CONFOUND_CHECK.md)).
-
-## 6. Accessing the Paper & Artifacts
-
-| Document / Resource | Description |
-|---|---|
-| **[docs/research.md](docs/research.md)** | **Consolidated Research Guide**: All datasets, full result tables, scaling slopes, and failure analysis in a single document. |
-| **[docs/final_paper_v27.md](docs/final_paper_v27.md)** | **The Manuscript**: Complete submitted paper (*"Cardinality Before Contention"*), section for section and table for table. |
-| **[docs/rmit_experiment_protocol.md](docs/rmit_experiment_protocol.md)** | Main RMIT experimental protocol and Azure VM provisioning guide. |
-| **[docs/followup_experiment_protocol.md](docs/followup_experiment_protocol.md)** | Axis-separation protocol for `sharded_bucketed` and `thread_local_owned`. |
-| **[docs/figures/](docs/figures)** | Publication figures in high-res PNG and vector PDF format. |
-| **[CITATION.cff](CITATION.cff)** | Citation metadata for academic publications. |
-
-### Reproducing the Results
-
-To download the raw data from Zenodo and regenerate all numbers, tables, and figures from scratch:
+### Reproducing the Paper Results
 
 ```bash
 # 1. Setup Python analysis environment
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Fetch raw datasets (~7 MB, SHA256 verified)
+# 2. Fetch raw datasets from Zenodo (~7 MB, SHA256 verified)
 scripts/fetch_data.sh
 
-# 3. Regenerate all paper figures and statistics
+# 3. Regenerate all tables and publication figures
 python3 scripts/analyze_design_axes.py
 python3 scripts/generate_design_axes_figures.py
 ```
+
 Outputs regenerate byte-identical figures in `docs/figures/` and analysis in `experiments/design_axes_analysis.json`.
 
 ---
@@ -393,7 +314,7 @@ Outputs regenerate byte-identical figures in `docs/figures/` and analysis in `ex
 │   └── store.rs               # Storage engine abstraction trait
 ├── benchmarks/                # rustredis-bench: custom asynchronous load generator
 ├── docs/                      # Documentation & Research
-│   ├── research.md            # Complete consolidated research data and analysis
+│   ├── research.md            # Comprehensive research data, tables, and methodology
 │   ├── final_paper_v27.md     # Full submitted research paper manuscript
 │   ├── figures/               # Vector and PNG publication figures
 │   └── *_protocol.md          # Cloud VM provisioning and RMIT execution protocols
